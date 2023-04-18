@@ -28,7 +28,7 @@ fn testStep(
         .target = target,
         .optimize = optimize,
     });
-    return main_tests.run();
+    return b.addRunArtifact(main_tests);
 }
 
 /// Returns the path to the JS code file, used for building artifacts.
