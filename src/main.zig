@@ -6,7 +6,7 @@ pub fn generate(comptime Bindings: type, zig_writer: anytype, js_writer: anytype
         .Struct => {},
         else => @compileError("Expected struct, found '" ++ @typeName(Bindings) ++ "'"),
     }
-    try emitNamespace([_][]const u8{}, zig_writer, js_writer, Bindings);
+    try emitNamespace([_][]const u8{}, zig_writer, js_writer, Bindings, "", "");
 }
 
 fn emitNamespace(
@@ -14,6 +14,8 @@ fn emitNamespace(
     zig_writer: anytype,
     js_writer: anytype,
     comptime Namespace: type,
+    comptime zig_indention: []const u8,
+    comptime js_indention: []const u8,
 ) !void {
     const decls: []const std.builtin.Type.Declaration = switch (@typeInfo(Namespace)) {
         .Struct => |info| info.decls,
@@ -24,8 +26,19 @@ fn emitNamespace(
         if (!decl.is_pub) continue;
         const D = @field(Namespace, decl.name);
         switch (@typeInfo(D)) {
-            .Struct => try emitNamespace(namespaces ++ [_][]const u8{decl.name}, zig_writer, js_writer, D),
-            .Fn => |info| try emitFunction(namespaces, zig_writer, js_writer, decl.name, info),
+            .Struct => {
+                try std.fmt.format(zig_writer, zig_indention ++ "pub const {s} = struct {{\n", .{decl.name});
+                try emitNamespace(
+                    namespaces ++ [_][]const u8{decl.name},
+                    zig_writer,
+                    js_writer,
+                    D,
+                    zig_indention ++ "    ",
+                    js_indention ++ "  ",
+                );
+                try std.fmt.format(zig_writer, zig_indention ++ "}};\n", .{});
+            },
+            .Fn => |info| try emitFunction(namespaces, zig_writer, js_writer, decl.name, info, zig_indention, js_indention),
             inline else => @compileError(formatNamespaces(namespaces) ++ ": expected `pub const foo = struct` or `pub const foo = fn`, found '" ++ @typeName(D) ++ "'"),
         }
     }
@@ -37,9 +50,20 @@ fn emitFunction(
     js_writer: anytype,
     comptime name: []const u8,
     comptime func: std.builtin.Type.Fn,
+    comptime zig_indention: []const u8,
+    comptime js_indention: []const u8,
 ) !void {
-    try std.fmt.format(js_writer, "namespace={s} func={s} params={} return_type={?}\n", .{ formatNamespaces(namespaces), name, func.params.len, func.return_type });
-    try std.fmt.format(zig_writer, "namespace={s} func={s} params={} return_type={?}\n", .{ formatNamespaces(namespaces), name, func.params.len, func.return_type });
+    try std.fmt.format(js_writer, js_indention ++ "namespace={s} func={s} params={} return_type={?}\n", .{
+        formatNamespaces(namespaces),
+        name,
+        func.params.len,
+        func.return_type,
+    });
+    try std.fmt.format(zig_writer, zig_indention ++ "pub fn {s}({}) {?} {{}}\n", .{
+        name,
+        func.params.len,
+        func.return_type,
+    });
 }
 
 fn formatNamespaces(comptime namespaces: anytype) []const u8 {
@@ -84,16 +108,20 @@ test {
     try generate(sysjs_zig, generated_zig.writer(), generated_js.writer());
 
     try testing.expectEqualStrings(
-        \\namespace= func=not_namespaced params=1 return_type=void
-        \\namespace=.console func=log params=1 return_type=void
-        \\namespace=.console.debug func=log params=1 return_type=void
+        \\pub fn not_namespaced(1) void {}
+        \\pub const console = struct {
+        \\    pub fn log(1) void {}
+        \\    pub const debug = struct {
+        \\        pub fn log(1) void {}
+        \\    };
+        \\};
         \\
     , generated_zig.items);
 
     try testing.expectEqualStrings(
         \\namespace= func=not_namespaced params=1 return_type=void
-        \\namespace=.console func=log params=1 return_type=void
-        \\namespace=.console.debug func=log params=1 return_type=void
+        \\  namespace=.console func=log params=1 return_type=void
+        \\    namespace=.console.debug func=log params=1 return_type=void
         \\
     , generated_js.items);
 }
