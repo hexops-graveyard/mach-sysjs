@@ -55,12 +55,18 @@ fn emitFunctionPreamble(
     }
     abs_name = abs_name ++ name;
 
-    try std.fmt.format(zig_writer, "pub extern fn {s}({}) {?};\n", .{
-        abs_name,
-        func.params.len,
-        func.return_type,
-    });
+    try std.fmt.format(zig_writer, "extern fn {s}(", .{name});
+    const extern_params = zigExternParams(func.params);
+    inline for (extern_params, 0..) |p, index| {
+        try std.fmt.format(zig_writer, "v{}: {s}", .{ index, zigType(p.type.?) });
+        if (index != extern_params.len - 1) try std.fmt.format(zig_writer, ", ", .{});
+    }
+    try std.fmt.format(zig_writer, ")", .{});
+    const return_type = if (func.return_type) |t| zigType(t) else "void";
+    try std.fmt.format(zig_writer, " {s}", .{return_type});
+    try std.fmt.format(zig_writer, " {{}}\n", .{});
 }
+
 fn emitNamespace(
     comptime namespaces: anytype,
     zig_writer: anytype,
@@ -111,11 +117,15 @@ fn emitFunction(
         func.params.len,
         func.return_type,
     });
-    try std.fmt.format(zig_writer, zig_indention ++ "pub inline fn {s}({}) {?} {{}}\n", .{
-        name,
-        func.params.len,
-        func.return_type,
-    });
+    try std.fmt.format(zig_writer, zig_indention ++ "pub inline fn {s}(", .{name});
+    inline for (func.params, 0..) |p, index| {
+        try std.fmt.format(zig_writer, "v{}: {s}", .{ index, zigType(p.type.?) });
+        if (index != func.params.len - 1) try std.fmt.format(zig_writer, ", ", .{});
+    }
+    try std.fmt.format(zig_writer, ")", .{});
+    const return_type = if (func.return_type) |t| zigType(t) else "void";
+    try std.fmt.format(zig_writer, " {s}", .{return_type});
+    try std.fmt.format(zig_writer, " {{}}\n", .{});
 }
 
 fn formatNamespaces(comptime namespaces: anytype) []const u8 {
@@ -124,6 +134,30 @@ fn formatNamespaces(comptime namespaces: anytype) []const u8 {
         v = v ++ "." ++ ns;
     }
     return v;
+}
+
+fn zigType(comptime T: type) []const u8 {
+    return switch (T) {
+        []const u8 => "[]const u8",
+        *const u8 => "*const u8",
+        u32 => "u32",
+        void => "void",
+        inline else => @compileError("Unsupported parameter/return type: '" ++ @typeName(T) ++ "'"),
+    };
+}
+
+fn zigExternParams(comptime params: []const std.builtin.Type.Fn.Param) []const std.builtin.Type.Fn.Param {
+    comptime var out: []const std.builtin.Type.Fn.Param = &.{};
+    inline for (params) |p| {
+        switch (p.type.?) {
+            []const u8 => out = out ++ &[_]std.builtin.Type.Fn.Param{
+                .{ .is_generic = false, .is_noalias = false, .type = *const u8 },
+                .{ .is_generic = false, .is_noalias = false, .type = u32 },
+            },
+            inline else => out = out ++ &[_]std.builtin.Type.Fn.Param{p},
+        }
+    }
+    return out;
 }
 
 test {
@@ -160,15 +194,15 @@ test {
     try generate(sysjs_zig, generated_zig.writer(), generated_js.writer());
 
     try testing.expectEqualStrings(
-        \\pub extern fn not_namespaced(1) void;
-        \\pub extern fn console_log(1) void;
-        \\pub extern fn console_debug_log(1) void;
+        \\extern fn not_namespaced(v0: *const u8, v1: u32) void {}
+        \\extern fn log(v0: *const u8, v1: u32) void {}
+        \\extern fn log(v0: *const u8, v1: u32) void {}
         \\
-        \\pub inline fn not_namespaced(1) void {}
+        \\pub inline fn not_namespaced(v0: []const u8) void {}
         \\pub const console = struct {
-        \\    pub inline fn log(1) void {}
+        \\    pub inline fn log(v0: []const u8) void {}
         \\    pub const debug = struct {
-        \\        pub inline fn log(1) void {}
+        \\        pub inline fn log(v0: []const u8) void {}
         \\    };
         \\};
         \\
