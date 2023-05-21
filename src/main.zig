@@ -48,14 +48,14 @@ fn emitFunctionPreamble(
     comptime func: std.builtin.Type.Fn,
 ) !void {
     _ = js_writer;
-    comptime var abs_name: []const u8 = "";
+    comptime var abs_name: []const u8 = "sysjs_";
     inline for (namespaces) |ns| {
         abs_name = abs_name ++ ns;
         abs_name = abs_name ++ "_";
     }
     abs_name = abs_name ++ name;
 
-    try std.fmt.format(zig_writer, "extern fn {s}(", .{name});
+    try std.fmt.format(zig_writer, "extern fn {s}(", .{abs_name});
     const extern_params = zigExternParams(func.params);
     inline for (extern_params, 0..) |p, index| {
         try std.fmt.format(zig_writer, "v{}: {s}", .{ index, zigType(p.type.?) });
@@ -63,8 +63,7 @@ fn emitFunctionPreamble(
     }
     try std.fmt.format(zig_writer, ")", .{});
     const return_type = if (func.return_type) |t| zigType(t) else "void";
-    try std.fmt.format(zig_writer, " {s}", .{return_type});
-    try std.fmt.format(zig_writer, " {{}}\n", .{});
+    try std.fmt.format(zig_writer, " {s};\n", .{return_type});
 }
 
 fn emitNamespace(
@@ -111,7 +110,7 @@ fn emitFunction(
     comptime zig_indention: []const u8,
     comptime js_indention: []const u8,
 ) !void {
-    try std.fmt.format(js_writer, js_indention ++ "namespace={s} func={s} params={} return_type={?}\n", .{
+    try std.fmt.format(js_writer, js_indention ++ "//namespace={s} func={s} params={} return_type={?}\n", .{
         formatNamespaces(namespaces),
         name,
         func.params.len,
@@ -125,7 +124,32 @@ fn emitFunction(
     try std.fmt.format(zig_writer, ")", .{});
     const return_type = if (func.return_type) |t| zigType(t) else "void";
     try std.fmt.format(zig_writer, " {s}", .{return_type});
-    try std.fmt.format(zig_writer, " {{}}\n", .{});
+    try std.fmt.format(zig_writer, " {{\n", .{});
+
+    // Zig function body
+    comptime var abs_name: []const u8 = "sysjs_";
+    inline for (namespaces) |ns| {
+        abs_name = abs_name ++ ns;
+        abs_name = abs_name ++ "_";
+    }
+    abs_name = abs_name ++ name;
+    try std.fmt.format(zig_writer, zig_indention ++ "    {s}(", .{abs_name});
+
+    inline for (func.params, 0..) |p, index| {
+        switch (p.type.?) {
+            []const u8 => {
+                try std.fmt.format(zig_writer, "v{}.ptr, v{}.len", .{ index, index });
+            },
+            inline else => {
+                try std.fmt.format(zig_writer, "v{}", .{index});
+            },
+        }
+        if (index != func.params.len - 1) try std.fmt.format(zig_writer, ", ", .{});
+    }
+
+    try std.fmt.format(zig_writer, ");\n", .{});
+
+    try std.fmt.format(zig_writer, zig_indention ++ "}}\n", .{});
 }
 
 fn formatNamespaces(comptime namespaces: anytype) []const u8 {
@@ -139,7 +163,7 @@ fn formatNamespaces(comptime namespaces: anytype) []const u8 {
 fn zigType(comptime T: type) []const u8 {
     return switch (T) {
         []const u8 => "[]const u8",
-        *const u8 => "*const u8",
+        *const u8 => "[*]const u8",
         u32 => "u32",
         void => "void",
         inline else => @compileError("Unsupported parameter/return type: '" ++ @typeName(T) ++ "'"),
@@ -194,24 +218,30 @@ test {
     try generate(sysjs_zig, generated_zig.writer(), generated_js.writer());
 
     try testing.expectEqualStrings(
-        \\extern fn not_namespaced(v0: *const u8, v1: u32) void {}
-        \\extern fn log(v0: *const u8, v1: u32) void {}
-        \\extern fn log(v0: *const u8, v1: u32) void {}
+        \\extern fn sysjs_not_namespaced(v0: [*]const u8, v1: u32) void;
+        \\extern fn sysjs_console_log(v0: [*]const u8, v1: u32) void;
+        \\extern fn sysjs_console_debug_log(v0: [*]const u8, v1: u32) void;
         \\
-        \\pub inline fn not_namespaced(v0: []const u8) void {}
+        \\pub inline fn not_namespaced(v0: []const u8) void {
+        \\    sysjs_not_namespaced(v0.ptr, v0.len);
+        \\}
         \\pub const console = struct {
-        \\    pub inline fn log(v0: []const u8) void {}
+        \\    pub inline fn log(v0: []const u8) void {
+        \\        sysjs_console_log(v0.ptr, v0.len);
+        \\    }
         \\    pub const debug = struct {
-        \\        pub inline fn log(v0: []const u8) void {}
+        \\        pub inline fn log(v0: []const u8) void {
+        \\            sysjs_console_debug_log(v0.ptr, v0.len);
+        \\        }
         \\    };
         \\};
         \\
     , generated_zig.items);
 
     try testing.expectEqualStrings(
-        \\namespace= func=not_namespaced params=1 return_type=void
-        \\  namespace=.console func=log params=1 return_type=void
-        \\    namespace=.console.debug func=log params=1 return_type=void
+        \\//namespace= func=not_namespaced params=1 return_type=void
+        \\  //namespace=.console func=log params=1 return_type=void
+        \\    //namespace=.console.debug func=log params=1 return_type=void
         \\
     , generated_js.items);
 }

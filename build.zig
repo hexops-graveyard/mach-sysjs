@@ -1,9 +1,10 @@
 const std = @import("std");
+const sysjs = @import("src/main.zig");
 
 /// Global instance of this module's builder to be used by functions invoked from other modules.
 var builder_instance: ?*std.Build = null;
 
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     builder_instance = b;
 
     const optimize = b.standardOptimizeOption(.{});
@@ -12,6 +13,28 @@ pub fn build(b: *std.Build) void {
     _ = b.addModule("mach-sysjs", .{
         .source_file = .{ .path = "src/main.zig" },
     });
+
+    // Use sysjs to generate bindings
+    var generated_zig = try std.fs.cwd().createFile("example/sysjs_generated.zig", .{});
+    var generated_js = try std.fs.cwd().createFile("example/sysjs_generated.js", .{});
+    try sysjs.generate(@import("example/sysjs.zig"), generated_zig.writer(), generated_js.writer());
+    generated_zig.close();
+    generated_js.close();
+
+    // std.Build.SharedLibraryOptions{}
+    // std.zig.CrossTarget{};
+    const wasm32_freestanding = std.zig.CrossTarget{ .cpu_arch = .wasm32, .os_tag = .freestanding };
+    const lib = b.addSharedLibrary(.{
+        .name = "example",
+        .root_source_file = .{ .path = "example/main.zig" },
+        .optimize = optimize,
+        .target = wasm32_freestanding,
+    });
+    lib.rdynamic = true;
+
+    const example_install = b.addInstallArtifact(lib);
+    var example_compile_step = b.step("example", "Compile example");
+    example_compile_step.dependOn(&example_install.step);
 
     const test_step = b.step("test", "Run library tests");
     test_step.dependOn(&testStep(b, optimize, target).step);
