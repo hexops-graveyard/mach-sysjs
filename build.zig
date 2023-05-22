@@ -15,14 +15,14 @@ pub fn build(b: *std.Build) !void {
     });
 
     // Use sysjs to generate bindings
-    var generated_zig = try std.fs.cwd().createFile("example/sysjs_generated.zig", .{});
-    var generated_js = try std.fs.cwd().createFile("example/sysjs_generated.js", .{});
-    try sysjs.generate(@import("example/sysjs.zig"), generated_zig.writer(), generated_js.writer());
-    generated_zig.close();
-    generated_js.close();
+    try sysjs.generateFiles(
+        @import("example/sysjs.zig"),
+        "sysjs_exports.zig",
+        @import("example/sysjs_exports.zig"),
+        "example/sysjs_generated.zig",
+        "example/sysjs_generated.js",
+    );
 
-    // std.Build.SharedLibraryOptions{}
-    // std.zig.CrossTarget{};
     const wasm32_freestanding = std.zig.CrossTarget{ .cpu_arch = .wasm32, .os_tag = .freestanding };
     const lib = b.addSharedLibrary(.{
         .name = "example",

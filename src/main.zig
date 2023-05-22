@@ -1,7 +1,27 @@
 const std = @import("std");
 const testing = std.testing;
 
-pub fn generate(comptime Bindings: type, zig_writer: anytype, js_writer: anytype) !void {
+pub fn generateFiles(
+    comptime Bindings: type,
+    comptime bindings_import: []const u8,
+    comptime Exports: ?type,
+    sysjs_generated_zig: []const u8,
+    sysjs_generated_js: []const u8,
+) !void {
+    var generated_zig = try std.fs.cwd().createFile(sysjs_generated_zig, .{});
+    var generated_js = try std.fs.cwd().createFile(sysjs_generated_js, .{});
+    try generate(Bindings, bindings_import, Exports, generated_zig.writer(), generated_js.writer());
+    generated_zig.close();
+    generated_js.close();
+}
+
+pub fn generate(
+    comptime Bindings: type,
+    comptime bindings_import: []const u8,
+    comptime Exports: ?type,
+    zig_writer: anytype,
+    js_writer: anytype,
+) !void {
     switch (@typeInfo(Bindings)) {
         .Struct => {},
         else => @compileError("Expected struct, found '" ++ @typeName(Bindings) ++ "'"),
@@ -9,6 +29,10 @@ pub fn generate(comptime Bindings: type, zig_writer: anytype, js_writer: anytype
     try emitNamespacePreamble([_][]const u8{}, zig_writer, js_writer, Bindings);
     try std.fmt.format(zig_writer, "\n", .{});
     try emitNamespace([_][]const u8{}, zig_writer, js_writer, Bindings, "", "");
+    if (Exports) |E| {
+        try std.fmt.format(zig_writer, "\n", .{});
+        try emitNamespaceExports(bindings_import, E, zig_writer, js_writer);
+    }
 }
 
 fn emitNamespacePreamble(
@@ -138,7 +162,7 @@ fn emitFunction(
     inline for (func.params, 0..) |p, index| {
         switch (p.type.?) {
             []const u8 => {
-                try std.fmt.format(zig_writer, "v{}.ptr, v{}.len", .{ index, index });
+                try std.fmt.format(zig_writer, "v{}.ptr, @intCast(u32, v{}.len)", .{ index, index });
             },
             inline else => {
                 try std.fmt.format(zig_writer, "v{}", .{index});
@@ -150,6 +174,37 @@ fn emitFunction(
     try std.fmt.format(zig_writer, ");\n", .{});
 
     try std.fmt.format(zig_writer, zig_indention ++ "}}\n", .{});
+}
+
+fn emitNamespaceExports(
+    comptime bindings_import: []const u8,
+    comptime Exports: type,
+    zig_writer: anytype,
+    js_writer: anytype,
+) !void {
+    _ = js_writer;
+
+    try std.fmt.format(zig_writer, "const user_code = @import(\"{s}\");\n\n", .{bindings_import});
+
+    const decls: []const std.builtin.Type.Declaration = switch (@typeInfo(Exports)) {
+        .Struct => |info| info.decls,
+        else => @compileError("exports: expected struct, found '" ++ @typeName(Exports) ++ "'"),
+    };
+    inline for (decls) |decl| {
+        if (!decl.is_pub) continue;
+        const d = @field(Exports, decl.name);
+        const func = switch (@typeInfo(@TypeOf(d))) {
+            .Fn => |info| info,
+            inline else => @compileError("exports: expected `pub fn`, found '" ++ @typeName(d) ++ "'"),
+        };
+
+        try std.fmt.format(zig_writer, "export fn {s}(", .{decl.name});
+        const return_type = if (func.return_type) |t| zigType(t) else "void";
+        try std.fmt.format(zig_writer, ") {s} {{\n", .{return_type});
+        try std.fmt.format(zig_writer, "    return user_code.{s}();\n", .{decl.name});
+        try std.fmt.format(zig_writer, "}}\n", .{});
+        // try emitFunctionPreamble(namespaces, zig_writer, js_writer, decl.name, info)
+    }
 }
 
 fn formatNamespaces(comptime namespaces: anytype) []const u8 {
@@ -207,6 +262,15 @@ test {
         const not_pub_foo = fn () void;
     };
 
+    // Typically stored in a sysjs_exports.zig file
+    const sysjs_exports_zig = struct {
+        const std2 = @import("std");
+
+        pub fn doPrint(s: []const u8) void {
+            std2.debug.print("hello from Zig: {s}", .{s});
+        }
+    };
+
     const allocator = testing.allocator;
 
     var generated_zig = std.ArrayList(u8).init(allocator);
@@ -215,7 +279,13 @@ test {
     var generated_js = std.ArrayList(u8).init(allocator);
     defer generated_js.deinit();
 
-    try generate(sysjs_zig, generated_zig.writer(), generated_js.writer());
+    try generate(
+        sysjs_zig,
+        "sysjs_generated.zig",
+        sysjs_exports_zig,
+        generated_zig.writer(),
+        generated_js.writer(),
+    );
 
     try testing.expectEqualStrings(
         \\extern fn sysjs_not_namespaced(v0: [*]const u8, v1: u32) void;
