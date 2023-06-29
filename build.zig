@@ -16,9 +16,8 @@ pub fn build(b: *std.Build) !void {
 
     // Use sysjs to generate bindings
     try sysjs.generateFiles(
-        @import("example/sysjs.zig"),
-        "sysjs_exports.zig",
-        @import("example/sysjs_exports.zig"),
+        b.allocator,
+        "example/sysjs.zig",
         "example/sysjs_generated.zig",
         "example/sysjs_generated.js",
     );
