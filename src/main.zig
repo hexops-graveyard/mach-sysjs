@@ -90,6 +90,7 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                         switch (type_expr.tag) {
                             .fn_proto_simple, .fn_proto_multi => {
                                 try gen.fnProto(field.ast.type_expr, field.ast.main_token, indent);
+                                try gen.fnProtoWrapper(field.ast.type_expr, field.ast.main_token, indent);
                                 continue;
                             },
                             else => {
@@ -100,7 +101,6 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                 }
 
                 // If it wasn't consumed, just emit it directly.
-                _ = try gen.zig.writeByte('\n');
                 _ = try gen.zig.writeByteNTimes(' ', indent);
                 try std.fmt.format(gen.zig, "{s}", .{gen.tree.getNodeSource(decl_idx)});
                 switch (gen.tree.nodes.get(decl_idx).tag) {
@@ -117,24 +117,6 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                     else => |tag| {
                         std.debug.print("{s}\n", .{@tagName(tag)});
                     },
-                }
-            }
-
-            for (container_decl.ast.members) |decl_idx| {
-                // If this decl is a struct field `foo: fn () void,` then consume it.
-                if (gen.tree.fullContainerField(decl_idx)) |field| {
-                    if (field.ast.value_expr == 0) {
-                        const type_expr = gen.tree.nodes.get(field.ast.type_expr);
-                        switch (type_expr.tag) {
-                            .fn_proto_simple, .fn_proto_multi => {
-                                try gen.fnProtoWrapper(field.ast.type_expr, field.ast.main_token, indent);
-                                continue;
-                            },
-                            else => {
-                                std.debug.print("{s}\n", .{@tagName(type_expr.tag)});
-                            },
-                        }
-                    }
                 }
             }
         }
@@ -169,7 +151,6 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             var param_buf: [1]Ast.Node.Index = undefined;
             const fn_proto = gen.tree.fullFnProto(&param_buf, node_index).?;
 
-            _ = try gen.zig.writeByte('\n');
             _ = try gen.zig.writeByteNTimes(' ', indent);
             try std.fmt.format(gen.zig, "pub inline fn {s}(", .{gen.tree.tokenSlice(name_token)});
 
@@ -210,7 +191,7 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
 
             // }
             _ = try gen.zig.writeByteNTimes(' ', indent);
-            _ = try gen.zig.write("}\n");
+            _ = try gen.zig.write("}\n\n");
         }
 
         const TypeState = enum {
