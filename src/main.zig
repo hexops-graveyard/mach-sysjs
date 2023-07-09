@@ -252,18 +252,18 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
         // Emits parameters for functions, but in their 'extern' form.
         // e.g. expanding `[]const u8` to a pointer and length or such.
         fn externParam(gen: *@This(), param_name: ?[]const u8, type_index: Ast.Node.Index) !void {
-            const tags = gen.tree.tokens.items(.tag);
-
             var i: Ast.Node.Index = undefined;
             const state = gen.typeState(type_index, &i);
 
-            const is_const = tags[i + 1] == .keyword_const;
-            const js_type = gen.tree.tokenSlice(i + 2); // TODO: convert zig types to js types
+            const token_starts = gen.tree.tokens.items(.start);
+
+            const last_token = gen.tree.lastToken(type_index);
+            const end = token_starts[last_token] + gen.tree.tokenSlice(last_token).len;
+            const js_type = gen.tree.source[token_starts[i + 1]..end];
 
             if (state == .slice) {
                 try printParamName(gen.zig, param_name, null);
-                try std.fmt.format(gen.zig, "[*]{s}{s}, ", .{
-                    if (is_const) "const " else " ",
+                try std.fmt.format(gen.zig, "[*]{s}, ", .{
                     js_type,
                 });
 
