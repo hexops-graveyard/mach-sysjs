@@ -149,9 +149,10 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             while (params_iter.next()) |param| : (i += 1) {
                 if (i != 0) try std.fmt.format(gen.zig, ", ", .{});
                 if (param.name_token) |param_name_token| {
-                    try std.fmt.format(gen.zig, "{s}: {s}", .{ gen.tree.tokenSlice(param_name_token), gen.tree.getNodeSource(param.type_expr) });
+                    const param_name = gen.tree.tokenSlice(param_name_token);
+                    try gen.externParam(param_name, param.type_expr);
                 } else {
-                    try std.fmt.format(gen.zig, "{s}", .{gen.tree.getNodeSource(param.type_expr)});
+                    try gen.externParam(null, param.type_expr);
                 }
             }
 
@@ -191,9 +192,13 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             while (pass_params_iter.next()) |param| : (i += 1) {
                 if (i != 0) try std.fmt.format(gen.zig, ", ", .{});
                 if (param.name_token) |param_name_token| {
-                    try std.fmt.format(gen.zig, "{s}", .{gen.tree.tokenSlice(param_name_token)});
+                    const param_name = gen.tree.tokenSlice(param_name_token);
+                    try gen.externArg(param_name, param.type_expr);
                 } else {
-                    try std.fmt.format(gen.zig, "v{d}", .{i});
+                    const param_name = try std.fmt.allocPrint(gen.allocator, "v{d}", .{i});
+                    defer gen.allocator.free(param_name);
+
+                    try gen.externArg(param_name, param.type_expr);
                 }
             }
             _ = try gen.zig.write(");\n");
@@ -203,8 +208,81 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             _ = try gen.zig.write("}\n");
         }
 
-        // TODO: write a function that emits parameters for functions, but in their 'extern' form.
+        const TypeState = enum {
+            none,
+
+            maybe_sequence,
+            sequence,
+            slice,
+        };
+
+        fn typeState(gen: *@This(), type_index: Ast.Node.Index, final_index: ?*Ast.Node.Index) TypeState {
+            const tags = gen.tree.tokens.items(.tag);
+            const first_token = gen.tree.firstToken(type_index);
+            const last_token = gen.tree.lastToken(type_index);
+
+            var i = first_token;
+            var state: TypeState = .none;
+            while (i < last_token) : (i += 1) {
+                switch (tags[i]) {
+                    .l_bracket => if (state == .none) {
+                        state = .maybe_sequence;
+                    },
+                    .r_bracket => if (state == .maybe_sequence) {
+                        // TODO: handle arrays and multi-pointer
+                        state = .slice;
+                        break;
+                    },
+                    else => {},
+                }
+            }
+
+            if (final_index) |idx| idx.* = i;
+            return state;
+        }
+
+        fn printParamName(writer: anytype, param_name: ?[]const u8, extension: ?[]const u8) !void {
+            if (param_name) |param| {
+                try writer.writeAll(param);
+                if (extension) |ext| try writer.writeAll(ext);
+                try writer.writeAll(": ");
+            }
+        }
+
+        // Emits parameters for functions, but in their 'extern' form.
         // e.g. expanding `[]const u8` to a pointer and length or such.
-        // fn externParam
+        fn externParam(gen: *@This(), param_name: ?[]const u8, type_index: Ast.Node.Index) !void {
+            const tags = gen.tree.tokens.items(.tag);
+
+            var i: Ast.Node.Index = undefined;
+            const state = gen.typeState(type_index, &i);
+
+            const is_const = tags[i + 1] == .keyword_const;
+            const js_type = gen.tree.tokenSlice(i + 2); // TODO: convert zig types to js types
+
+            if (state == .slice) {
+                try printParamName(gen.zig, param_name, null);
+                try std.fmt.format(gen.zig, "[*]{s}{s}, ", .{
+                    if (is_const) "const " else " ",
+                    js_type,
+                });
+
+                try printParamName(gen.zig, param_name, "_len");
+                try gen.zig.writeAll("u32");
+            } else {
+                try printParamName(gen.zig, param_name, null);
+                try std.fmt.format(gen.zig, "{s}", .{gen.tree.getNodeSource(type_index)});
+            }
+        }
+
+        // Emits arguments for function calls, but in their 'extern' form.
+        // e.g. expanding `[]const u8` to a pointer and length or such.
+        fn externArg(gen: *@This(), param_name: []const u8, type_index: Ast.Node.Index) !void {
+            const type_state = gen.typeState(type_index, null);
+            switch (type_state) {
+                .slice => try std.fmt.format(gen.zig, "{s}.ptr, {s}.len", .{ param_name, param_name }),
+                else => try std.fmt.format(gen.zig, "{s}", .{param_name}),
+            }
+        }
     };
 }
