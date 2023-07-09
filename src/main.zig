@@ -68,7 +68,7 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                             // pub var/const
                             const init_node = gen.tree.nodes.get(var_decl.ast.init_node);
                             switch (init_node.tag) {
-                                .container_decl_two_trailing => {
+                                .container_decl_trailing, .container_decl_two_trailing => {
                                     _ = try gen.zig.writeByte('\n');
                                     _ = try gen.zig.writeByteNTimes(' ', indent);
                                     try std.fmt.format(gen.zig, "pub const {s} = struct {{\n", .{member_name});
@@ -111,7 +111,12 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                     => {
                         try std.fmt.format(gen.zig, ";\n", .{});
                     },
-                    else => {},
+                    .container_field_init => {
+                        try std.fmt.format(gen.zig, ",\n", .{});
+                    },
+                    else => |tag| {
+                        std.debug.print("{s}\n", .{@tagName(tag)});
+                    },
                 }
             }
 
