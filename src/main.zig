@@ -3,6 +3,7 @@ const testing = std.testing;
 const Ast = std.zig.Ast;
 
 const analysis = @import("analysis.zig");
+const Type = @import("types.zig").Type;
 
 pub fn generateFiles(
     allocator: std.mem.Allocator,
@@ -227,48 +228,18 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             return state;
         }
 
-        fn printParamName(writer: anytype, param_name: ?[]const u8, extension: ?[]const u8) !void {
-            if (param_name) |param| {
-                try writer.writeAll(param);
-                if (extension) |ext| try writer.writeAll(ext);
-                try writer.writeAll(": ");
-            }
-        }
-
         // Emits parameters for functions, but in their 'extern' form.
         // e.g. expanding `[]const u8` to a pointer and length or such.
         fn externParam(gen: *@This(), param_name: ?[]const u8, type_index: Ast.Node.Index) !void {
-            var i: Ast.Node.Index = undefined;
-            const state = gen.typeState(type_index, &i);
-
-            const token_starts = gen.tree.tokens.items(.start);
-
-            const last_token = gen.tree.lastToken(type_index);
-            const end = token_starts[last_token] + gen.tree.tokenSlice(last_token).len;
-            const js_type = gen.tree.source[token_starts[i + 1]..end];
-
-            if (state == .slice) {
-                try printParamName(gen.zig, param_name, null);
-                try std.fmt.format(gen.zig, "[*]{s}, ", .{
-                    js_type,
-                });
-
-                try printParamName(gen.zig, param_name, "_len");
-                try gen.zig.writeAll("u32");
-            } else {
-                try printParamName(gen.zig, param_name, null);
-                try std.fmt.format(gen.zig, "{s}", .{gen.tree.getNodeSource(type_index)});
-            }
+            const ty = try Type.fromAst(gen.allocator, gen.tree, type_index);
+            try ty.emitExternParam(gen.zig, param_name);
         }
 
         // Emits arguments for function calls, but in their 'extern' form.
         // e.g. expanding `[]const u8` to a pointer and length or such.
         fn externArg(gen: *@This(), param_name: []const u8, type_index: Ast.Node.Index) !void {
-            const type_state = gen.typeState(type_index, null);
-            switch (type_state) {
-                .slice => try std.fmt.format(gen.zig, "{s}.ptr, {s}.len", .{ param_name, param_name }),
-                else => try std.fmt.format(gen.zig, "{s}", .{param_name}),
-            }
+            const ty = try Type.fromAst(gen.allocator, gen.tree, type_index);
+            try ty.emitExternArg(gen.zig, param_name);
         }
     };
 }
