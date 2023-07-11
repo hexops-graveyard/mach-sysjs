@@ -68,9 +68,12 @@ pub const Function = struct {
     }
 };
 
-pub const Type = union(enum) {
-    int: Int,
-    ptr: Ptr,
+pub const Type = struct {
+    slice: []const u8,
+    info: union(enum) {
+        int: Int,
+        ptr: Ptr,
+    },
 
     pub const Int = struct {
         bits: u32,
@@ -99,10 +102,15 @@ pub const Type = union(enum) {
         }
     }
 
+    pub fn emitParam(ty: Type, writer: anytype, param_name: ?[]const u8) !void {
+        try printParamName(writer, param_name, null);
+        try writer.writeAll(ty.slice);
+    }
+
     pub fn emitExternParam(ty: Type, writer: anytype, param_name: ?[]const u8) !void {
         try printParamName(writer, param_name, null);
 
-        switch (ty) {
+        switch (ty.info) {
             .int => |int| try std.fmt.format(writer, "{c}{d}", .{
                 @tagName(int.signedness)[0],
                 int.bits,
@@ -123,7 +131,7 @@ pub const Type = union(enum) {
     }
 
     pub fn emitExternArg(ty: Type, writer: anytype, arg_name: []const u8) !void {
-        switch (ty) {
+        switch (ty.info) {
             .ptr => |ptr| switch (ptr.size) {
                 .slice => try std.fmt.format(writer, "{s}.ptr, {s}.len", .{ arg_name, arg_name }),
                 else => {}, // TODO: one, many
@@ -133,6 +141,8 @@ pub const Type = union(enum) {
     }
 
     pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, index: Ast.TokenIndex) !Type {
+        const token_slice = tree.getNodeSource(index);
+
         const tags = tree.tokens.items(.tag);
         const first_token = tree.firstToken(index);
         const last_token = tree.lastToken(index);
@@ -159,17 +169,29 @@ pub const Type = union(enum) {
         // TODO: also parse the actual type
         if (size) |s| {
             const base_ty = try allocator.create(Type);
-            base_ty.* = Type{ .int = .{
-                .bits = 8,
-                .signedness = .unsigned,
-            } };
-            return Type{ .ptr = .{
-                .size = s,
-                .is_const = is_const,
-                .base_ty = base_ty,
-            } };
+            base_ty.* = Type{
+                .slice = token_slice,
+                .info = .{ .int = .{
+                    .bits = 8,
+                    .signedness = .unsigned,
+                } },
+            };
+            return Type{
+                .slice = token_slice,
+                .info = .{ .ptr = .{
+                    .size = s,
+                    .is_const = is_const,
+                    .base_ty = base_ty,
+                } },
+            };
         } else {
-            return Type{ .int = .{ .bits = 32, .signedness = .unsigned } };
+            return Type{
+                .slice = token_slice,
+                .info = .{ .int = .{
+                    .bits = 32,
+                    .signedness = .unsigned,
+                } },
+            };
         }
     }
 };
