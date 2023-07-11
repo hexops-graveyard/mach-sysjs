@@ -22,9 +22,50 @@ pub const Function = struct {
     params: []Param,
 
     pub const Param = struct {
-        name: []const u8,
+        name: ?[]const u8,
         type: Type,
     };
+
+    pub fn emitExtern(fun: Function, writer: anytype) !void {
+        try writer.writeAll("extern fn sysjs_");
+        try writer.writeAll(fun.name); // TODO: namespaces
+        try writer.writeByte('(');
+
+        for (fun.params, 0..) |param, i| {
+            if (i != 0) try writer.writeAll(", ");
+            try param.type.emitExternParam(writer, param.name);
+        }
+
+        try writer.writeAll(") ");
+        try fun.return_ty.emitExternParam(writer, null);
+        try writer.writeAll(";\n");
+    }
+
+    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !Function {
+        // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
+        var param_buf: [1]Ast.Node.Index = undefined;
+        const fn_proto = tree.fullFnProto(&param_buf, node_index).?;
+
+        const name = tree.tokenSlice(name_token);
+        const return_type = try Type.fromAst(allocator, tree, fn_proto.ast.return_type);
+
+        var params: std.ArrayListUnmanaged(Param) = .{};
+
+        var params_iter = fn_proto.iterate(&tree);
+        var i: usize = 0;
+        while (params_iter.next()) |param| : (i += 1) {
+            try params.append(allocator, .{
+                .name = if (param.name_token) |nt| tree.tokenSlice(nt) else null,
+                .type = try Type.fromAst(allocator, tree, param.type_expr),
+            });
+        }
+
+        return Function{
+            .name = name,
+            .return_ty = return_type,
+            .params = params.items,
+        };
+    }
 };
 
 pub const Type = union(enum) {

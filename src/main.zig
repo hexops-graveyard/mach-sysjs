@@ -4,6 +4,7 @@ const Ast = std.zig.Ast;
 
 const analysis = @import("analysis.zig");
 const Type = @import("types.zig").Type;
+const Function = @import("types.zig").Function;
 
 pub fn generateFiles(
     allocator: std.mem.Allocator,
@@ -123,28 +124,9 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
         }
 
         fn fnProto(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
-            // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
-            var param_buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = gen.tree.fullFnProto(&param_buf, node_index).?;
-
-            _ = try gen.zig.writeByteNTimes(' ', indent);
-            try std.fmt.format(gen.zig, "extern fn sysjs_", .{});
-            for (gen.namespace.items) |ns| try std.fmt.format(gen.zig, "{s}_", .{ns});
-            try std.fmt.format(gen.zig, "{s}(", .{gen.tree.tokenSlice(name_token)});
-
-            var params_iter = fn_proto.iterate(&gen.tree);
-            var i: usize = 0;
-            while (params_iter.next()) |param| : (i += 1) {
-                if (i != 0) try std.fmt.format(gen.zig, ", ", .{});
-                if (param.name_token) |param_name_token| {
-                    const param_name = gen.tree.tokenSlice(param_name_token);
-                    try gen.externParam(param_name, param.type_expr);
-                } else {
-                    try gen.externParam(null, param.type_expr);
-                }
-            }
-
-            try std.fmt.format(gen.zig, ") {s};\n", .{gen.tree.getNodeSource(fn_proto.ast.return_type)});
+            _ = indent;
+            const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
+            try fun.emitExtern(gen.zig);
         }
 
         fn fnProtoWrapper(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
