@@ -130,51 +130,11 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
         }
 
         fn fnProtoWrapper(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
+            _ = indent;
             // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
-            var param_buf: [1]Ast.Node.Index = undefined;
-            const fn_proto = gen.tree.fullFnProto(&param_buf, node_index).?;
 
-            _ = try gen.zig.writeByteNTimes(' ', indent);
-            try std.fmt.format(gen.zig, "pub inline fn {s}(", .{gen.tree.tokenSlice(name_token)});
-
-            var params_iter = fn_proto.iterate(&gen.tree);
-            var i: usize = 0;
-            while (params_iter.next()) |param| : (i += 1) {
-                if (i != 0) try std.fmt.format(gen.zig, ", ", .{});
-                if (param.name_token) |param_name_token| {
-                    try std.fmt.format(gen.zig, "{s}: {s}", .{ gen.tree.tokenSlice(param_name_token), gen.tree.getNodeSource(param.type_expr) });
-                } else {
-                    try std.fmt.format(gen.zig, "v{d}: {s}", .{ i, gen.tree.getNodeSource(param.type_expr) });
-                }
-            }
-
-            // return sysjs_x_y_z(
-            try std.fmt.format(gen.zig, ") {s} {{\n", .{gen.tree.getNodeSource(fn_proto.ast.return_type)});
-            _ = try gen.zig.writeByteNTimes(' ', indent + 4);
-            _ = try gen.zig.write("return sysjs_");
-            for (gen.namespace.items) |ns| try std.fmt.format(gen.zig, "{s}_", .{ns});
-            try std.fmt.format(gen.zig, "{s}(", .{gen.tree.tokenSlice(name_token)});
-
-            // a, b, c);
-            i = 0;
-            var pass_params_iter = fn_proto.iterate(&gen.tree);
-            while (pass_params_iter.next()) |param| : (i += 1) {
-                if (i != 0) try std.fmt.format(gen.zig, ", ", .{});
-                if (param.name_token) |param_name_token| {
-                    const param_name = gen.tree.tokenSlice(param_name_token);
-                    try gen.externArg(param_name, param.type_expr);
-                } else {
-                    const param_name = try std.fmt.allocPrint(gen.allocator, "v{d}", .{i});
-                    defer gen.allocator.free(param_name);
-
-                    try gen.externArg(param_name, param.type_expr);
-                }
-            }
-            _ = try gen.zig.write(");\n");
-
-            // }
-            _ = try gen.zig.writeByteNTimes(' ', indent);
-            _ = try gen.zig.write("}\n\n");
+            const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
+            try fun.emitWrapper(gen.zig, gen.allocator);
         }
 
         // Emits parameters for functions, but in their 'extern' form.
