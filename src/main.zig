@@ -195,39 +195,6 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             _ = try gen.zig.write("}\n\n");
         }
 
-        const TypeState = enum {
-            none,
-
-            maybe_sequence,
-            sequence,
-            slice,
-        };
-
-        fn typeState(gen: *@This(), type_index: Ast.Node.Index, final_index: ?*Ast.Node.Index) TypeState {
-            const tags = gen.tree.tokens.items(.tag);
-            const first_token = gen.tree.firstToken(type_index);
-            const last_token = gen.tree.lastToken(type_index);
-
-            var i = first_token;
-            var state: TypeState = .none;
-            while (i < last_token) : (i += 1) {
-                switch (tags[i]) {
-                    .l_bracket => if (state == .none) {
-                        state = .maybe_sequence;
-                    },
-                    .r_bracket => if (state == .maybe_sequence) {
-                        // TODO: handle arrays and multi-pointer
-                        state = .slice;
-                        break;
-                    },
-                    else => {},
-                }
-            }
-
-            if (final_index) |idx| idx.* = i;
-            return state;
-        }
-
         // Emits parameters for functions, but in their 'extern' form.
         // e.g. expanding `[]const u8` to a pointer and length or such.
         fn externParam(gen: *@This(), param_name: ?[]const u8, type_index: Ast.Node.Index) !void {
