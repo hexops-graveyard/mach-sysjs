@@ -41,6 +41,41 @@ pub const Function = struct {
         try writer.writeAll(";\n");
     }
 
+    pub fn emitWrapper(fun: Function, writer: anytype, allocator: std.mem.Allocator) !void {
+        try writer.print("pub inline fn {s}(", .{fun.name});
+
+        for (fun.params, 0..) |param, i| {
+            if (i != 0) try writer.writeAll(", ");
+            if (param.name) |name| {
+                try param.type.emitParam(writer, name);
+            } else {
+                const name = try std.fmt.allocPrint(allocator, "v{d}", .{i});
+                try param.type.emitParam(writer, name);
+            }
+        }
+
+        try writer.writeAll(") ");
+        try fun.return_ty.emitParam(writer, null);
+        try writer.writeAll(" {\n");
+
+        try writer.writeAll("return sysjs_");
+        try writer.writeAll(fun.name); // TODO: namespaces
+        try writer.writeByte('(');
+
+        for (fun.params, 0..) |param, i| {
+            if (i != 0) try writer.writeAll(", ");
+            if (param.name) |name| {
+                try param.type.emitExternArg(writer, name);
+            } else {
+                const name = try std.fmt.allocPrint(allocator, "v{d}", .{i});
+                try param.type.emitExternArg(writer, name);
+            }
+        }
+
+        try writer.writeAll(");\n");
+        try writer.writeAll("}\n");
+    }
+
     pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !Function {
         // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
         var param_buf: [1]Ast.Node.Index = undefined;
