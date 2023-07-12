@@ -91,8 +91,16 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                         const type_expr = gen.tree.nodes.get(field.ast.type_expr);
                         switch (type_expr.tag) {
                             .fn_proto_simple, .fn_proto_multi => {
-                                try gen.fnProto(field.ast.type_expr, field.ast.main_token, indent);
-                                try gen.fnProtoWrapper(field.ast.type_expr, field.ast.main_token, indent);
+                                const fun = try Function.fromAst(
+                                    gen.allocator,
+                                    gen.tree,
+                                    field.ast.type_expr,
+                                    field.ast.main_token,
+                                );
+
+                                try fun.emitExtern(gen.zig, indent);
+                                try fun.emitWrapper(gen.zig, indent);
+
                                 continue;
                             },
                             else => {
@@ -121,32 +129,6 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                     },
                 }
             }
-        }
-
-        fn fnProto(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
-            const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
-            try fun.emitExtern(gen.zig, indent);
-        }
-
-        fn fnProtoWrapper(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
-            // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
-
-            const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
-            try fun.emitWrapper(gen.zig, indent);
-        }
-
-        // Emits parameters for functions, but in their 'extern' form.
-        // e.g. expanding `[]const u8` to a pointer and length or such.
-        fn externParam(gen: *@This(), param_name: ?[]const u8, type_index: Ast.Node.Index) !void {
-            const ty = try Type.fromAst(gen.allocator, gen.tree, type_index);
-            try ty.emitExternParam(gen.zig, param_name);
-        }
-
-        // Emits arguments for function calls, but in their 'extern' form.
-        // e.g. expanding `[]const u8` to a pointer and length or such.
-        fn externArg(gen: *@This(), param_name: []const u8, type_index: Ast.Node.Index) !void {
-            const ty = try Type.fromAst(gen.allocator, gen.tree, type_index);
-            try ty.emitExternArg(gen.zig, param_name);
         }
     };
 }
