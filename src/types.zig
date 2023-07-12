@@ -88,7 +88,6 @@ pub const Function = struct {
     }
 
     pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !Function {
-        // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
         var param_buf: [1]Ast.Node.Index = undefined;
         const fn_proto = tree.fullFnProto(&param_buf, node_index).?;
 
@@ -147,12 +146,14 @@ pub const Type = struct {
             try writer.writeAll(": ");
         }
     }
-
+    // Emits parameters for functions in zig's format.
     pub fn emitParam(ty: Type, writer: anytype, param_name: ?[]const u8) !void {
         try printParamName(writer, param_name, null);
         try writer.writeAll(ty.slice);
     }
 
+    // Emits parameters for functions, but in their 'extern' form.
+    // e.g. expanding `[]const u8` to a pointer and length or such.
     pub fn emitExternParam(ty: Type, writer: anytype, param_name: ?[]const u8) !void {
         try printParamName(writer, param_name, null);
 
@@ -176,6 +177,8 @@ pub const Type = struct {
         }
     }
 
+    // Emits arguments for function calls, but in their 'extern' form.
+    // e.g. expanding `[]const u8` to a pointer and length or such.
     pub fn emitExternArg(ty: Type, writer: anytype, arg_name: []const u8) !void {
         switch (ty.info) {
             .ptr => |ptr| switch (ptr.size) {
