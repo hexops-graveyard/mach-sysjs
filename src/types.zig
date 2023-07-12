@@ -42,16 +42,21 @@ pub const Function = struct {
         try writer.writeAll(";\n");
     }
 
-    pub fn emitWrapper(fun: Function, writer: anytype, allocator: std.mem.Allocator, indent: u8) !void {
+    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.print("pub inline fn {s}(", .{fun.name});
+
+        // No. of parameters in zig's self hosted wasm backend is limited to maxInt(u32).
+        // The actual number of limit is however runtime implementation defined.
+        const max_param_count = comptime std.math.log10_int(@as(u32, std.math.maxInt(u32))) + 1;
 
         for (fun.params, 0..) |param, i| {
             if (i != 0) try writer.writeAll(", ");
             if (param.name) |name| {
                 try param.type.emitParam(writer, name);
             } else {
-                const name = try std.fmt.allocPrint(allocator, "v{d}", .{i});
+                var buf: [max_param_count]u8 = .{};
+                const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitParam(writer, name);
             }
         }
@@ -70,7 +75,8 @@ pub const Function = struct {
             if (param.name) |name| {
                 try param.type.emitExternArg(writer, name);
             } else {
-                const name = try std.fmt.allocPrint(allocator, "v{d}", .{i});
+                var buf: [max_param_count]u8 = .{};
+                const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitExternArg(writer, name);
             }
         }
