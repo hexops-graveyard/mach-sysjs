@@ -124,17 +124,15 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
         }
 
         fn fnProto(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
-            _ = indent;
             const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
-            try fun.emitExtern(gen.zig);
+            try fun.emitExtern(gen.zig, indent);
         }
 
         fn fnProtoWrapper(gen: *@This(), node_index: Ast.Node.Index, name_token: Ast.TokenIndex, indent: u8) !void {
-            _ = indent;
             // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
 
             const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
-            try fun.emitWrapper(gen.zig, gen.allocator);
+            try fun.emitWrapper(gen.zig, gen.allocator, indent);
         }
 
         // Emits parameters for functions, but in their 'extern' form.

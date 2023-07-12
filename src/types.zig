@@ -26,7 +26,8 @@ pub const Function = struct {
         type: Type,
     };
 
-    pub fn emitExtern(fun: Function, writer: anytype) !void {
+    pub fn emitExtern(fun: Function, writer: anytype, indent: u8) !void {
+        _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("extern fn sysjs_");
         try writer.writeAll(fun.name); // TODO: namespaces
         try writer.writeByte('(');
@@ -41,7 +42,8 @@ pub const Function = struct {
         try writer.writeAll(";\n");
     }
 
-    pub fn emitWrapper(fun: Function, writer: anytype, allocator: std.mem.Allocator) !void {
+    pub fn emitWrapper(fun: Function, writer: anytype, allocator: std.mem.Allocator, indent: u8) !void {
+        _ = try writer.writeByteNTimes(' ', indent);
         try writer.print("pub inline fn {s}(", .{fun.name});
 
         for (fun.params, 0..) |param, i| {
@@ -58,6 +60,7 @@ pub const Function = struct {
         try fun.return_ty.emitParam(writer, null);
         try writer.writeAll(" {\n");
 
+        _ = try writer.writeByteNTimes(' ', indent + 4);
         try writer.writeAll("return sysjs_");
         try writer.writeAll(fun.name); // TODO: namespaces
         try writer.writeByte('(');
@@ -73,6 +76,8 @@ pub const Function = struct {
         }
 
         try writer.writeAll(");\n");
+
+        _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("}\n");
     }
 
