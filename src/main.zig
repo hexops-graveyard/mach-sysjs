@@ -132,7 +132,7 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
             // Generate namespaced name (`extern fn sysjs_foo_bar_baz`)
 
             const fun = try Function.fromAst(gen.allocator, gen.tree, node_index, name_token);
-            try fun.emitWrapper(gen.zig, gen.allocator, indent);
+            try fun.emitWrapper(gen.zig, indent);
         }
 
         // Emits parameters for functions, but in their 'extern' form.
