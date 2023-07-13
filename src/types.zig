@@ -3,19 +3,41 @@ const Ast = std.zig.Ast;
 const analysis = @import("analysis.zig");
 
 pub const Container = struct {
-    fields: []Field,
-    decls: []Decl,
+    name: ?[]const u8 = null,
+    parent: ?*Decl = null,
+    fields: []*Field,
+    decls: []*Decl,
     std_code: []const u8,
 
-    pub const Field = union(enum) {
-        func: Function,
-        std_field: []const u8,
+    pub const Field = struct {
+        parent: ?*Container = null,
+        content: union(enum) {
+            func: Function,
+            std_field: []const u8,
+        },
 
-        pub fn emit(field: Field, writer: anytype, indent: u8) !void {
-            switch (field) {
+        pub fn emit(field: Field, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
+            switch (field.content) {
                 .func => |fun| {
-                    try fun.emitExtern(writer, indent);
-                    try fun.emitWrapper(writer, indent);
+                    var namespace: std.ArrayListUnmanaged(u8) = .{};
+                    defer namespace.deinit(allocator);
+
+                    var parent: ?*Container = field.parent;
+                    while (parent) |par| {
+                        if (par.name) |name| {
+                            try namespace.insert(allocator, 0, '_');
+                            try namespace.insertSlice(allocator, 0, name);
+                        }
+
+                        if (par.parent) |pd| {
+                            parent = pd.parent;
+                        } else {
+                            break;
+                        }
+                    }
+
+                    try fun.emitExtern(writer, indent, namespace.items);
+                    try fun.emitWrapper(writer, indent, namespace.items);
                 },
                 .std_field => |stdf| {
                     _ = try writer.writeByteNTimes(' ', indent);
@@ -25,8 +47,9 @@ pub const Container = struct {
             }
         }
 
-        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !Field {
+        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !*Field {
             const field = tree.fullContainerField(node).?;
+            var field_obj = try allocator.create(Field);
 
             if (field.ast.value_expr == 0) {
                 const type_expr = tree.nodes.get(field.ast.type_expr);
@@ -39,29 +62,31 @@ pub const Container = struct {
                             field.ast.main_token,
                         );
 
-                        return Field{
-                            .func = fun,
+                        field_obj.* = .{
+                            .content = .{ .func = fun },
                         };
+                        return field_obj;
                     },
                     else => {},
                 }
             }
-            return Field{
-                .std_field = tree.getNodeSource(node),
+            field_obj.* = .{
+                .content = .{ .std_field = tree.getNodeSource(node) },
             };
+            return field_obj;
         }
     };
 
     pub const Decl = struct {
-        name: ?[]const u8,
+        parent: ?*Container = null,
         content: union(enum) {
-            container: Container,
+            container: *Container,
             std_decl: []const u8,
         },
 
-        pub fn emit(decl: Decl, writer: anytype, indent: u8) anyerror!void {
+        pub fn emit(decl: Decl, allocator: std.mem.Allocator, writer: anytype, indent: u8) anyerror!void {
             switch (decl.content) {
-                .container => |cont| try cont.emit(writer, decl.name, indent),
+                .container => |cont| try cont.emit(allocator, writer, indent),
                 .std_decl => |stdd| {
                     _ = try writer.writeByteNTimes(' ', indent);
                     try writer.writeAll(stdd);
@@ -70,8 +95,8 @@ pub const Container = struct {
             }
         }
 
-        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !Decl {
-            const name = if (analysis.getDeclNameToken(tree, node)) |token| tree.tokenSlice(token) else null;
+        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !*Decl {
+            var decl = try allocator.create(Decl);
 
             const var_decl = tree.fullVarDecl(node).?;
             // var/const
@@ -82,36 +107,33 @@ pub const Container = struct {
                     const init_node = tree.nodes.get(var_decl.ast.init_node);
                     switch (init_node.tag) {
                         .container_decl_trailing, .container_decl_two_trailing => {
-                            return Decl{
-                                .name = name,
-                                .content = .{
-                                    .container = try Container.fromAst(
-                                        allocator,
-                                        tree,
-                                        var_decl.ast.init_node,
-                                    ),
-                                },
+                            var cont = try Container.fromAst(allocator, tree, var_decl.ast.init_node, node);
+                            cont.parent = decl;
+                            decl.* = .{
+                                .content = .{ .container = cont },
                             };
+
+                            return decl;
                         },
                         else => {},
                     }
                 }
             }
 
-            return Decl{
-                .name = null,
+            decl.* = .{
                 .content = .{
                     .std_decl = tree.getNodeSource(node),
                 },
             };
+            return decl;
         }
     };
 
-    pub fn emit(container: Container, writer: anytype, name: ?[]const u8, indent: u8) !void {
+    pub fn emit(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
         _ = try writer.writeByte('\n');
 
         var local_indent = indent;
-        if (name) |n| {
+        if (container.name) |n| {
             _ = try writer.writeByteNTimes(' ', indent);
             // TODO: namespacing
             try std.fmt.format(writer, "pub const {s} = struct {{\n", .{n});
@@ -123,33 +145,37 @@ pub const Container = struct {
         // So mainting the original order could put a normal field between two decls
         // which is not legal in zig
         for (container.fields) |field|
-            if (std.meta.activeTag(field) == .func)
-                try field.emit(writer, local_indent);
+            if (std.meta.activeTag(field.*.content) == .func)
+                try field.emit(allocator, writer, local_indent);
 
         for (container.fields) |field|
-            if (std.meta.activeTag(field) == .std_field)
-                try field.emit(writer, local_indent);
+            if (std.meta.activeTag(field.*.content) == .std_field)
+                try field.emit(allocator, writer, local_indent);
 
         for (container.decls) |decl|
-            try decl.emit(writer, local_indent);
+            try decl.emit(allocator, writer, local_indent);
 
         try writer.writeAll(container.std_code);
 
-        if (name != null) {
+        if (container.name != null) {
             _ = try writer.writeByteNTimes(' ', indent);
             _ = try writer.write("};\n");
         }
     }
 
-    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) anyerror!Container {
+    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, name_idx: Ast.Node.Index) anyerror!*Container {
+        const name = if (analysis.getDeclNameToken(tree, name_idx)) |token| tree.tokenSlice(token) else null;
+
         var buf: [2]Ast.Node.Index = undefined;
         const container_decl = tree.fullContainerDecl(&buf, node).?;
 
-        var fields: std.ArrayListUnmanaged(Field) = .{};
-        var decls: std.ArrayListUnmanaged(Decl) = .{};
+        var fields: std.ArrayListUnmanaged(*Field) = .{};
+        var decls: std.ArrayListUnmanaged(*Decl) = .{};
         var std_code: std.ArrayListUnmanaged(u8) = .{};
         defer fields.deinit(allocator);
         defer decls.deinit(allocator);
+
+        var cont = try allocator.create(Container);
 
         for (container_decl.ast.members) |decl_idx| {
             switch (analysis.getDeclType(tree, decl_idx)) {
@@ -157,12 +183,14 @@ pub const Container = struct {
                 .field => {
                     var field = try Field.fromAst(allocator, tree, decl_idx);
                     try fields.append(allocator, field);
+                    field.parent = cont;
                     continue;
                 },
                 // If this decl is a `pub const foo = struct {};` then consume it
                 .decl => {
                     var decl = try Decl.fromAst(allocator, tree, decl_idx);
                     try decls.append(allocator, decl);
+                    decl.parent = cont;
                     continue;
                 },
                 .other => {
@@ -172,11 +200,13 @@ pub const Container = struct {
             }
         }
 
-        return Container{
+        cont.* = .{
+            .name = name,
             .fields = try fields.toOwnedSlice(allocator),
             .decls = try decls.toOwnedSlice(allocator),
             .std_code = try std_code.toOwnedSlice(allocator),
         };
+        return cont;
     }
 };
 
@@ -190,10 +220,11 @@ pub const Function = struct {
         type: Type,
     };
 
-    pub fn emitExtern(fun: Function, writer: anytype, indent: u8) !void {
+    pub fn emitExtern(fun: Function, writer: anytype, indent: u8, namespace: []const u8) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("extern fn sysjs_");
-        try writer.writeAll(fun.name); // TODO: namespaces
+        try writer.writeAll(namespace);
+        try writer.writeAll(fun.name);
         try writer.writeByte('(');
 
         for (fun.params, 0..) |param, i| {
@@ -206,7 +237,7 @@ pub const Function = struct {
         try writer.writeAll(";\n");
     }
 
-    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8) !void {
+    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8, namespace: []const u8) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.print("pub inline fn {s}(", .{fun.name});
 
@@ -231,7 +262,8 @@ pub const Function = struct {
 
         _ = try writer.writeByteNTimes(' ', indent + 4);
         try writer.writeAll("return sysjs_");
-        try writer.writeAll(fun.name); // TODO: namespaces
+        try writer.writeAll(namespace);
+        try writer.writeAll(fun.name);
         try writer.writeByte('(');
 
         for (fun.params, 0..) |param, i| {
