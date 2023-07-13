@@ -55,3 +55,14 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
         else => null,
     };
 }
+
+pub fn getDeclType(tree: Ast, decl_idx: Ast.Node.Index) enum { field, decl } {
+    const tags = tree.nodes.items(.tag);
+    return switch (tags[decl_idx]) {
+        .container_field_init,
+        .container_field_align,
+        .container_field,
+        => .field,
+        else => .decl, // TODO
+    };
+}
