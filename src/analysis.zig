@@ -56,13 +56,18 @@ pub fn getDeclNameToken(tree: Ast, node: Ast.Node.Index) ?Ast.TokenIndex {
     };
 }
 
-pub fn getDeclType(tree: Ast, decl_idx: Ast.Node.Index) enum { field, decl } {
+pub fn getDeclType(tree: Ast, decl_idx: Ast.Node.Index) enum { field, decl, other } {
     const tags = tree.nodes.items(.tag);
     return switch (tags[decl_idx]) {
         .container_field_init,
         .container_field_align,
         .container_field,
         => .field,
-        else => .decl, // TODO
+        .local_var_decl,
+        .global_var_decl,
+        .simple_var_decl,
+        .aligned_var_decl,
+        => .decl,
+        else => .other,
     };
 }

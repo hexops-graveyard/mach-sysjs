@@ -1,9 +1,11 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
+const analysis = @import("analysis.zig");
 
 pub const Container = struct {
     fields: []Field,
     decls: []Decl,
+    std_code: []const u8,
 
     pub const Field = union(enum) {
         func: Function,
@@ -50,10 +52,132 @@ pub const Container = struct {
         }
     };
 
-    pub const Decl = union {
-        namespace: Container,
-        std_decl: void,
+    pub const Decl = struct {
+        name: ?[]const u8,
+        content: union(enum) {
+            container: Container,
+            std_decl: []const u8,
+        },
+
+        pub fn emit(decl: Decl, writer: anytype, indent: u8) anyerror!void {
+            switch (decl.content) {
+                .container => |cont| try cont.emit(writer, decl.name, indent),
+                .std_decl => |stdd| {
+                    _ = try writer.writeByteNTimes(' ', indent);
+                    try writer.writeAll(stdd);
+                    try writer.writeAll(";\n");
+                },
+            }
+        }
+
+        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !Decl {
+            const name = if (analysis.getDeclNameToken(tree, node)) |token| tree.tokenSlice(token) else null;
+
+            const var_decl = tree.fullVarDecl(node).?;
+            // var/const
+            if (var_decl.visib_token) |visib_token| {
+                const visib = tree.tokenSlice(visib_token);
+                if (std.mem.eql(u8, visib, "pub")) {
+                    // pub var/const
+                    const init_node = tree.nodes.get(var_decl.ast.init_node);
+                    switch (init_node.tag) {
+                        .container_decl_trailing, .container_decl_two_trailing => {
+                            return Decl{
+                                .name = name,
+                                .content = .{
+                                    .container = try Container.fromAst(
+                                        allocator,
+                                        tree,
+                                        var_decl.ast.init_node,
+                                    ),
+                                },
+                            };
+                        },
+                        else => {},
+                    }
+                }
+            }
+
+            return Decl{
+                .name = null,
+                .content = .{
+                    .std_decl = tree.getNodeSource(node),
+                },
+            };
+        }
     };
+
+    pub fn emit(container: Container, writer: anytype, name: ?[]const u8, indent: u8) !void {
+        _ = try writer.writeByte('\n');
+
+        var local_indent = indent;
+        if (name) |n| {
+            _ = try writer.writeByteNTimes(' ', indent);
+            // TODO: namespacing
+            try std.fmt.format(writer, "pub const {s} = struct {{\n", .{n});
+            local_indent += 4;
+        }
+
+        // The correct order is not preserved from original file because fields
+        // containing function decl are converted to a decl (from zig's perspective).
+        // So mainting the original order could put a normal field between two decls
+        // which is not legal in zig
+        for (container.fields) |field|
+            if (std.meta.activeTag(field) == .func)
+                try field.emit(writer, local_indent);
+
+        for (container.fields) |field|
+            if (std.meta.activeTag(field) == .std_field)
+                try field.emit(writer, local_indent);
+
+        for (container.decls) |decl|
+            try decl.emit(writer, local_indent);
+
+        try writer.writeAll(container.std_code);
+
+        if (name != null) {
+            _ = try writer.writeByteNTimes(' ', indent);
+            _ = try writer.write("};\n");
+        }
+    }
+
+    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) anyerror!Container {
+        var buf: [2]Ast.Node.Index = undefined;
+        const container_decl = tree.fullContainerDecl(&buf, node).?;
+
+        var fields: std.ArrayListUnmanaged(Field) = .{};
+        var decls: std.ArrayListUnmanaged(Decl) = .{};
+        var std_code: std.ArrayListUnmanaged(u8) = .{};
+        defer fields.deinit(allocator);
+        defer decls.deinit(allocator);
+
+        for (container_decl.ast.members) |decl_idx| {
+            switch (analysis.getDeclType(tree, decl_idx)) {
+                // If this decl is a struct field `foo: fn () void,` then consume it.
+                .field => {
+                    var field = try Field.fromAst(allocator, tree, decl_idx);
+                    try fields.append(allocator, field);
+                    continue;
+                },
+                // If this decl is a `pub const foo = struct {};` then consume it
+                .decl => {
+                    var decl = try Decl.fromAst(allocator, tree, decl_idx);
+                    try decls.append(allocator, decl);
+                    continue;
+                },
+                .other => {
+                    try std_code.appendSlice(allocator, tree.getNodeSource(decl_idx));
+                    continue;
+                },
+            }
+        }
+
+        return Container{
+            .fields = try fields.toOwnedSlice(allocator),
+            .decls = try decls.toOwnedSlice(allocator),
+            .std_code = try std_code.toOwnedSlice(allocator),
+        };
+    }
 };
 
 pub const Function = struct {
