@@ -1,17 +1,57 @@
 const std = @import("std");
 const Ast = std.zig.Ast;
 
-pub const Namespace = struct {
+pub const Container = struct {
     fields: []Field,
     decls: []Decl,
 
-    pub const Field = union {
+    pub const Field = union(enum) {
         func: Function,
-        std_field: void,
+        std_field: []const u8,
+
+        pub fn emit(field: Field, writer: anytype, indent: u8) !void {
+            switch (field) {
+                .func => |fun| {
+                    try fun.emitExtern(writer, indent);
+                    try fun.emitWrapper(writer, indent);
+                },
+                .std_field => |stdf| {
+                    _ = try writer.writeByteNTimes(' ', indent);
+                    try writer.writeAll(stdf);
+                    try writer.writeAll(",\n");
+                },
+            }
+        }
+
+        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !Field {
+            const field = tree.fullContainerField(node).?;
+
+            if (field.ast.value_expr == 0) {
+                const type_expr = tree.nodes.get(field.ast.type_expr);
+                switch (type_expr.tag) {
+                    .fn_proto_simple, .fn_proto_multi => {
+                        const fun = try Function.fromAst(
+                            allocator,
+                            tree,
+                            field.ast.type_expr,
+                            field.ast.main_token,
+                        );
+
+                        return Field{
+                            .func = fun,
+                        };
+                    },
+                    else => {},
+                }
+            }
+            return Field{
+                .std_field = tree.getNodeSource(node),
+            };
+        }
     };
 
     pub const Decl = union {
-        namespace: Namespace,
+        namespace: Container,
         std_decl: void,
     };
 };

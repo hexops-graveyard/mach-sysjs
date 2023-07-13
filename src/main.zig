@@ -5,6 +5,7 @@ const Ast = std.zig.Ast;
 const analysis = @import("analysis.zig");
 const Type = @import("types.zig").Type;
 const Function = @import("types.zig").Function;
+const Container = @import("types.zig").Container;
 
 pub fn generateFiles(
     allocator: std.mem.Allocator,
@@ -86,28 +87,13 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                 }
 
                 // If this decl is a struct field `foo: fn () void,` then consume it.
-                if (gen.tree.fullContainerField(decl_idx)) |field| {
-                    if (field.ast.value_expr == 0) {
-                        const type_expr = gen.tree.nodes.get(field.ast.type_expr);
-                        switch (type_expr.tag) {
-                            .fn_proto_simple, .fn_proto_multi => {
-                                const fun = try Function.fromAst(
-                                    gen.allocator,
-                                    gen.tree,
-                                    field.ast.type_expr,
-                                    field.ast.main_token,
-                                );
-
-                                try fun.emitExtern(gen.zig, indent);
-                                try fun.emitWrapper(gen.zig, indent);
-
-                                continue;
-                            },
-                            else => {
-                                std.debug.print("{s}\n", .{@tagName(type_expr.tag)});
-                            },
-                        }
-                    }
+                switch (analysis.getDeclType(gen.tree, decl_idx)) {
+                    .field => {
+                        var fld = try Container.Field.fromAst(gen.allocator, gen.tree, decl_idx);
+                        try fld.emit(gen.zig, indent);
+                        continue;
+                    },
+                    else => {},
                 }
 
                 // If it wasn't consumed, just emit it directly.
