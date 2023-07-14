@@ -311,17 +311,26 @@ pub const Function = struct {
 
 pub const Type = struct {
     slice: []const u8,
-    info: union(enum) {
+    info: TypeInfo,
+
+    pub const TypeInfo = union(enum) {
         int: Int,
+        float: Float,
         ptr: Ptr,
-        none: void,
-    },
+        void: void,
+        bool: void,
+        anyopaque: void,
+    };
 
     pub const Int = struct {
-        bits: u32,
+        bits: u16,
         signedness: Signedness,
 
         pub const Signedness = enum { signed, unsigned };
+    };
+
+    pub const Float = struct {
+        bits: u16,
     };
 
     pub const Ptr = struct {
@@ -349,10 +358,6 @@ pub const Type = struct {
         try printParamName(writer, param_name, null);
 
         switch (ty.info) {
-            .int => |int| try std.fmt.format(writer, "{c}{d}", .{
-                @tagName(int.signedness)[0],
-                int.bits,
-            }),
             .ptr => |ptr| {
                 switch (ptr.size) {
                     .Slice => {
@@ -365,9 +370,7 @@ pub const Type = struct {
                     else => {}, // TODO: one, many
                 }
             },
-            .none => {
-                try writer.writeAll(ty.slice);
-            },
+            else => try writer.writeAll(ty.slice),
         }
     }
 
@@ -407,21 +410,61 @@ pub const Type = struct {
                 else => null,
             };
 
+            const float = token_slice[0] == 'f';
+            const c_types = token_slice[0] == 'c' and token_slice[1] == '_';
+
+            const size: ?u16 = std.fmt.parseInt(u16, token_slice[1..], 10) catch |err| blk: {
+                switch (err) {
+                    error.InvalidCharacter => break :blk null,
+                    else => |e| return e,
+                }
+            };
+
             if (signedness) |sig| {
-                const size = try std.fmt.parseInt(u16, token_slice[1..], 10);
+                // iXX or uXX
+                if (size) |sz| {
+                    return Type{
+                        .slice = token_slice,
+                        .info = .{
+                            .int = Int{
+                                .signedness = sig,
+                                .bits = sz,
+                            },
+                        },
+                    };
+                } else {
+                    // TODO: usize or isize
+                }
+            }
+
+            if (float and size != null) {
+                // fXX
                 return Type{
                     .slice = token_slice,
-                    .info = .{ .int = Int{
-                        .signedness = sig,
-                        .bits = size,
-                    } },
+                    .info = .{
+                        .float = Float{
+                            .bits = size.?,
+                        },
+                    },
                 };
             }
 
-            return Type{
-                .slice = token_slice,
-                .info = .{ .none = {} },
-            };
+            if (c_types) {
+                // TODO c types
+            }
+
+            inline for (std.meta.fields(Type.TypeInfo)) |field| {
+                if (field.type == void) {
+                    if (std.mem.eql(u8, token_slice, field.name)) {
+                        return Type{
+                            .slice = token_slice,
+                            .info = @unionInit(TypeInfo, field.name, {}),
+                        };
+                    }
+                }
+            }
+
+            @panic("TODO: error on impossible types");
         } else {
             @panic("TODO: non primitive types");
         }
