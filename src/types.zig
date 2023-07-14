@@ -314,6 +314,7 @@ pub const Type = struct {
     info: union(enum) {
         int: Int,
         ptr: Ptr,
+        none: void,
     },
 
     pub const Int = struct {
@@ -324,15 +325,9 @@ pub const Type = struct {
     };
 
     pub const Ptr = struct {
-        size: Size,
+        size: std.builtin.Type.Pointer.Size,
         is_const: bool,
         base_ty: *Type,
-
-        pub const Size = enum {
-            one,
-            many,
-            slice,
-        };
     };
 
     fn printParamName(writer: anytype, param_name: ?[]const u8, extension: ?[]const u8) !void {
@@ -360,7 +355,7 @@ pub const Type = struct {
             }),
             .ptr => |ptr| {
                 switch (ptr.size) {
-                    .slice => {
+                    .Slice => {
                         try std.fmt.format(writer, "[*]{s}", .{if (ptr.is_const) "const " else ""});
                         try ptr.base_ty.*.emitExternParam(writer, null);
                         try writer.writeAll(", ");
@@ -370,6 +365,9 @@ pub const Type = struct {
                     else => {}, // TODO: one, many
                 }
             },
+            .none => {
+                try writer.writeAll(ty.slice);
+            },
         }
     }
 
@@ -378,65 +376,54 @@ pub const Type = struct {
     pub fn emitExternArg(ty: Type, writer: anytype, arg_name: []const u8) !void {
         switch (ty.info) {
             .ptr => |ptr| switch (ptr.size) {
-                .slice => try std.fmt.format(writer, "{s}.ptr, {s}.len", .{ arg_name, arg_name }),
+                .Slice => try std.fmt.format(writer, "{s}.ptr, {s}.len", .{ arg_name, arg_name }),
                 else => {}, // TODO: one, many
             },
             else => try writer.writeAll(arg_name),
         }
     }
 
-    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, index: Ast.TokenIndex) !Type {
+    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, index: Ast.Node.Index) !Type {
         const token_slice = tree.getNodeSource(index);
+        if (tree.fullPtrType(index)) |ptr| {
+            const child_ty = try Type.fromAst(allocator, tree, ptr.ast.child_type);
+            var base_ty = try allocator.create(Type);
+            base_ty.* = child_ty;
 
-        const tags = tree.tokens.items(.tag);
-        const first_token = tree.firstToken(index);
-        const last_token = tree.lastToken(index);
-
-        var i = first_token;
-        var size: ?Ptr.Size = null;
-        var state: enum { none, maybe_sequence } = .none;
-        while (i < last_token) : (i += 1) {
-            switch (tags[i]) {
-                .l_bracket => if (state == .none) {
-                    state = .maybe_sequence;
-                },
-                .r_bracket => if (state == .maybe_sequence) {
-                    // TODO: handle arrays and multi-pointer
-                    size = .slice;
-                    break;
-                },
-                else => {},
-            }
-        }
-
-        const is_const = tags[i + 1] == .keyword_const;
-
-        // TODO: also parse the actual type
-        if (size) |s| {
-            const base_ty = try allocator.create(Type);
-            base_ty.* = Type{
-                .slice = token_slice,
-                .info = .{ .int = .{
-                    .bits = 8,
-                    .signedness = .unsigned,
-                } },
-            };
             return Type{
                 .slice = token_slice,
-                .info = .{ .ptr = .{
-                    .size = s,
-                    .is_const = is_const,
+                .info = .{ .ptr = Ptr{
+                    .size = ptr.size,
+                    .is_const = ptr.const_token != null,
                     .base_ty = base_ty,
                 } },
             };
-        } else {
+        }
+
+        if (std.zig.primitives.isPrimitive(token_slice)) {
+            const signedness: ?Int.Signedness = switch (token_slice[0]) {
+                'u' => .unsigned,
+                'i' => .signed,
+                else => null,
+            };
+
+            if (signedness) |sig| {
+                const size = try std.fmt.parseInt(u16, token_slice[1..], 10);
+                return Type{
+                    .slice = token_slice,
+                    .info = .{ .int = Int{
+                        .signedness = sig,
+                        .bits = size,
+                    } },
+                };
+            }
+
             return Type{
                 .slice = token_slice,
-                .info = .{ .int = .{
-                    .bits = 32,
-                    .signedness = .unsigned,
-                } },
+                .info = .{ .none = {} },
             };
+        } else {
+            @panic("TODO: non primitive types");
         }
     }
 };
