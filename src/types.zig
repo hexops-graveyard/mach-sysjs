@@ -2,6 +2,8 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const analysis = @import("analysis.zig");
 
+pub const Namespace = std.ArrayListUnmanaged(u8);
+
 pub const Container = struct {
     name: ?[]const u8 = null,
     parent: ?*Decl = null,
@@ -16,34 +18,50 @@ pub const Container = struct {
             std_field: []const u8,
         },
 
+        fn composeNamespace(field: Field, allocator: std.mem.Allocator) !Namespace {
+            var namespace: Namespace = .{};
+
+            var parent: ?*Container = field.parent;
+            while (parent) |par| {
+                if (par.name) |name| {
+                    try namespace.insert(allocator, 0, '_');
+                    try namespace.insertSlice(allocator, 0, name);
+                }
+
+                if (par.parent) |pd| {
+                    parent = pd.parent;
+                } else {
+                    break;
+                }
+            }
+
+            return namespace;
+        }
+
         pub fn emit(field: Field, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
             switch (field.content) {
                 .func => |fun| {
-                    var namespace: std.ArrayListUnmanaged(u8) = .{};
+                    var namespace = try field.composeNamespace(allocator);
                     defer namespace.deinit(allocator);
 
-                    var parent: ?*Container = field.parent;
-                    while (parent) |par| {
-                        if (par.name) |name| {
-                            try namespace.insert(allocator, 0, '_');
-                            try namespace.insertSlice(allocator, 0, name);
-                        }
-
-                        if (par.parent) |pd| {
-                            parent = pd.parent;
-                        } else {
-                            break;
-                        }
-                    }
-
-                    try fun.emitExtern(writer, indent, namespace.items);
-                    try fun.emitWrapper(writer, indent, namespace.items);
+                    try fun.emitExtern(writer, indent, namespace);
+                    try fun.emitWrapper(writer, indent, namespace);
                 },
                 .std_field => |stdf| {
                     _ = try writer.writeByteNTimes(' ', indent);
                     try writer.writeAll(stdf);
                     try writer.writeAll(",\n");
                 },
+            }
+        }
+
+        pub fn emitJs(field: Field, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
+            switch (field.content) {
+                .func => |fun| {
+                    var namespace = try field.composeNamespace(allocator);
+                    try fun.emitBinding(writer, indent, namespace);
+                },
+                else => {},
             }
         }
 
@@ -86,12 +104,19 @@ pub const Container = struct {
 
         pub fn emit(decl: Decl, allocator: std.mem.Allocator, writer: anytype, indent: u8) anyerror!void {
             switch (decl.content) {
-                .container => |cont| try cont.emit(allocator, writer, indent),
+                .container => |cont| try cont.emitZig(allocator, writer, indent),
                 .std_decl => |stdd| {
                     _ = try writer.writeByteNTimes(' ', indent);
                     try writer.writeAll(stdd);
                     try writer.writeAll(";\n");
                 },
+            }
+        }
+
+        pub fn emitJs(decl: Decl, allocator: std.mem.Allocator, writer: anytype, indent: u8) anyerror!void {
+            switch (decl.content) {
+                .container => |cont| try cont.emitJs(allocator, writer, indent),
+                else => {},
             }
         }
 
@@ -129,7 +154,7 @@ pub const Container = struct {
         }
     };
 
-    pub fn emit(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
+    pub fn emitZig(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
         _ = try writer.writeByte('\n');
 
         var local_indent = indent;
@@ -161,6 +186,14 @@ pub const Container = struct {
             _ = try writer.writeByteNTimes(' ', indent);
             _ = try writer.write("};\n");
         }
+    }
+
+    pub fn emitJs(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
+        for (container.fields) |field|
+            try field.emitJs(allocator, writer, indent);
+
+        for (container.decls) |decl|
+            try decl.emitJs(allocator, writer, indent);
     }
 
     pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, name_idx: Ast.Node.Index) anyerror!*Container {
@@ -215,15 +248,19 @@ pub const Function = struct {
     return_ty: Type,
     params: []Param,
 
+    // No. of parameters in zig's self hosted wasm backend is limited to maxInt(u32).
+    // The actual number of limit is however runtime implementation defined.
+    const max_param_char_count = std.math.log10_int(@as(u32, std.math.maxInt(u32))) + 1;
+
     pub const Param = struct {
         name: ?[]const u8,
         type: Type,
     };
 
-    pub fn emitExtern(fun: Function, writer: anytype, indent: u8, namespace: []const u8) !void {
+    pub fn emitExtern(fun: Function, writer: anytype, indent: u8, namespace: Namespace) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("extern fn sysjs_");
-        try writer.writeAll(namespace);
+        try writer.writeAll(namespace.items);
         try writer.writeAll(fun.name);
         try writer.writeByte('(');
 
@@ -237,20 +274,16 @@ pub const Function = struct {
         try writer.writeAll(";\n");
     }
 
-    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8, namespace: []const u8) !void {
+    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8, namespace: Namespace) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.print("pub inline fn {s}(", .{fun.name});
-
-        // No. of parameters in zig's self hosted wasm backend is limited to maxInt(u32).
-        // The actual number of limit is however runtime implementation defined.
-        const max_param_count = comptime std.math.log10_int(@as(u32, std.math.maxInt(u32))) + 1;
 
         for (fun.params, 0..) |param, i| {
             if (i != 0) try writer.writeAll(", ");
             if (param.name) |name| {
                 try param.type.emitParam(writer, name);
             } else {
-                var buf: [max_param_count]u8 = .{};
+                var buf: [Function.max_param_char_count]u8 = .{};
                 const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitParam(writer, name);
             }
@@ -262,7 +295,7 @@ pub const Function = struct {
 
         _ = try writer.writeByteNTimes(' ', indent + 4);
         try writer.writeAll("return sysjs_");
-        try writer.writeAll(namespace);
+        try writer.writeAll(namespace.items);
         try writer.writeAll(fun.name);
         try writer.writeByte('(');
 
@@ -271,7 +304,7 @@ pub const Function = struct {
             if (param.name) |name| {
                 try param.type.emitExternArg(writer, name);
             } else {
-                var buf: [max_param_count]u8 = .{};
+                var buf: [Function.max_param_char_count]u8 = .{};
                 const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitExternArg(writer, name);
             }
@@ -281,6 +314,52 @@ pub const Function = struct {
 
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("}\n");
+    }
+
+    pub fn emitBinding(fun: Function, writer: anytype, indent: u8, namespace: Namespace) !void {
+        _ = try writer.writeByteNTimes(' ', indent);
+        try writer.print("export function sysjs_{s}{s}(", .{ namespace.items, fun.name });
+
+        for (fun.params, 0..) |param, i| {
+            if (i != 0) try writer.writeAll(", ");
+            if (param.name) |name| {
+                try param.type.emitBindingParam(writer, name);
+            } else {
+                var buf: [Function.max_param_char_count]u8 = .{};
+                const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
+                try param.type.emitBindingParam(writer, name);
+            }
+        }
+
+        try writer.writeAll(") {\n");
+
+        for (fun.params, 0..) |param, i| {
+            _ = try writer.writeByteNTimes(' ', indent + 4);
+            if (param.name) |name| {
+                try param.type.emitBindingGet(writer, name, i);
+            } else {
+                var buf: [Function.max_param_char_count]u8 = .{};
+                const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
+                try param.type.emitBindingGet(writer, name, i);
+            }
+        }
+
+        _ = try writer.writeByteNTimes(' ', indent + 4);
+
+        var split = std.mem.splitSequence(u8, namespace.items, "_");
+        try writer.writeAll(split.first());
+        while (split.next()) |name| {
+            try writer.writeAll(".");
+            try writer.writeAll(name);
+        }
+        try writer.print("{s}(", .{fun.name});
+
+        for (0..fun.params.len) |i| {
+            if (i != 0) try writer.writeAll(", ");
+            try writer.print("l{d}", .{i});
+        }
+
+        try writer.writeAll(")\n}\n");
     }
 
     pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !Function {
@@ -383,6 +462,28 @@ pub const Type = struct {
                 else => {}, // TODO: one, many
             },
             else => try writer.writeAll(arg_name),
+        }
+    }
+
+    pub fn emitBindingParam(ty: Type, writer: anytype, param_name: []const u8) !void {
+        switch (ty.info) {
+            .ptr => |ptr| switch (ptr.size) {
+                .Slice => try std.fmt.format(writer, "{s}, {s}_len", .{ param_name, param_name }),
+                else => {}, // TODO: one, many
+            },
+            else => try writer.writeAll(param_name),
+        }
+    }
+
+    pub fn emitBindingGet(ty: Type, writer: anytype, param_name: []const u8, index: usize) !void {
+        switch (ty.info) {
+            .ptr => |ptr| switch (ptr.size) {
+                .Slice => {
+                    try writer.print("const l{d} = wasmGetString({s}, {s}_len);\n", .{ index, param_name, param_name });
+                },
+                else => {}, // TODO: one, many
+            },
+            else => try writer.print("const l{d} = {s};\n", .{ index, param_name }),
         }
     }
 
