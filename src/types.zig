@@ -6,153 +6,37 @@ pub const Namespace = std.ArrayListUnmanaged(u8);
 
 pub const Container = struct {
     name: ?[]const u8 = null,
-    parent: ?*Decl = null,
-    fields: []*Field,
-    decls: []*Decl,
-    std_code: []const u8,
+    parent: ?*Container = null,
+    contents: []Content,
 
-    pub const Field = struct {
-        parent: ?*Container = null,
-        content: union(enum) {
-            func: Function,
-            std_field: []const u8,
+    pub const Content = union(enum) {
+        func: Function,
+        container: *Container,
+        std_code: struct {
+            type: analysis.DeclType = .other,
+            data: []const u8,
         },
-
-        fn composeNamespace(field: Field, allocator: std.mem.Allocator) !Namespace {
-            var namespace: Namespace = .{};
-
-            var parent: ?*Container = field.parent;
-            while (parent) |par| {
-                if (par.name) |name| {
-                    try namespace.insert(allocator, 0, '_');
-                    try namespace.insertSlice(allocator, 0, name);
-                }
-
-                if (par.parent) |pd| {
-                    parent = pd.parent;
-                } else {
-                    break;
-                }
-            }
-
-            return namespace;
-        }
-
-        pub fn emit(field: Field, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
-            switch (field.content) {
-                .func => |fun| {
-                    var namespace = try field.composeNamespace(allocator);
-                    defer namespace.deinit(allocator);
-
-                    try fun.emitExtern(writer, indent, namespace);
-                    try fun.emitWrapper(writer, indent, namespace);
-                },
-                .std_field => |stdf| {
-                    _ = try writer.writeByteNTimes(' ', indent);
-                    try writer.writeAll(stdf);
-                    try writer.writeAll(",\n");
-                },
-            }
-        }
-
-        pub fn emitJs(field: Field, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
-            switch (field.content) {
-                .func => |fun| {
-                    var namespace = try field.composeNamespace(allocator);
-                    try fun.emitBinding(writer, indent, namespace);
-                },
-                else => {},
-            }
-        }
-
-        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !*Field {
-            const field = tree.fullContainerField(node).?;
-            var field_obj = try allocator.create(Field);
-
-            if (field.ast.value_expr == 0) {
-                const type_expr = tree.nodes.get(field.ast.type_expr);
-                switch (type_expr.tag) {
-                    .fn_proto_simple, .fn_proto_multi => {
-                        const fun = try Function.fromAst(
-                            allocator,
-                            tree,
-                            field.ast.type_expr,
-                            field.ast.main_token,
-                        );
-
-                        field_obj.* = .{
-                            .content = .{ .func = fun },
-                        };
-                        return field_obj;
-                    },
-                    else => {},
-                }
-            }
-            field_obj.* = .{
-                .content = .{ .std_field = tree.getNodeSource(node) },
-            };
-            return field_obj;
-        }
     };
 
-    pub const Decl = struct {
-        parent: ?*Container = null,
-        content: union(enum) {
-            container: *Container,
-            std_decl: []const u8,
-        },
+    fn composeNamespace(container: *const Container, allocator: std.mem.Allocator) !Namespace {
+        var namespace: Namespace = .{};
 
-        pub fn emit(decl: Decl, allocator: std.mem.Allocator, writer: anytype, indent: u8) anyerror!void {
-            switch (decl.content) {
-                .container => |cont| try cont.emitZig(allocator, writer, indent),
-                .std_decl => |stdd| {
-                    _ = try writer.writeByteNTimes(' ', indent);
-                    try writer.writeAll(stdd);
-                    try writer.writeAll(";\n");
-                },
+        var parent: ?*const Container = container;
+        while (parent) |par| {
+            if (par.name) |name| {
+                try namespace.insert(allocator, 0, '_');
+                try namespace.insertSlice(allocator, 0, name);
+            }
+
+            if (par.parent) |pd| {
+                parent = pd;
+            } else {
+                break;
             }
         }
 
-        pub fn emitJs(decl: Decl, allocator: std.mem.Allocator, writer: anytype, indent: u8) anyerror!void {
-            switch (decl.content) {
-                .container => |cont| try cont.emitJs(allocator, writer, indent),
-                else => {},
-            }
-        }
-
-        pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !*Decl {
-            var decl = try allocator.create(Decl);
-
-            const var_decl = tree.fullVarDecl(node).?;
-            // var/const
-            if (var_decl.visib_token) |visib_token| {
-                const visib = tree.tokenSlice(visib_token);
-                if (std.mem.eql(u8, visib, "pub")) {
-                    // pub var/const
-                    const init_node = tree.nodes.get(var_decl.ast.init_node);
-                    switch (init_node.tag) {
-                        .container_decl_trailing, .container_decl_two_trailing => {
-                            var cont = try Container.fromAst(allocator, tree, var_decl.ast.init_node, node);
-                            cont.parent = decl;
-                            decl.* = .{
-                                .content = .{ .container = cont },
-                            };
-
-                            return decl;
-                        },
-                        else => {},
-                    }
-                }
-            }
-
-            decl.* = .{
-                .content = .{
-                    .std_decl = tree.getNodeSource(node),
-                },
-            };
-            return decl;
-        }
-    };
+        return namespace;
+    }
 
     pub fn emitZig(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
         _ = try writer.writeByte('\n');
@@ -165,22 +49,28 @@ pub const Container = struct {
             local_indent += 4;
         }
 
-        // The correct order is not preserved from original file because fields
-        // containing function decl are converted to a decl (from zig's perspective).
-        // So mainting the original order could put a normal field between two decls
-        // which is not legal in zig
-        for (container.fields) |field|
-            if (std.meta.activeTag(field.*.content) == .func)
-                try field.emit(allocator, writer, local_indent);
+        for (container.contents) |content|
+            switch (content) {
+                .func => {
+                    var namespace = try container.composeNamespace(allocator);
+                    defer namespace.deinit(allocator);
 
-        for (container.fields) |field|
-            if (std.meta.activeTag(field.*.content) == .std_field)
-                try field.emit(allocator, writer, local_indent);
+                    const fun = content.func;
+                    try fun.emitExtern(writer, local_indent, namespace);
+                    try fun.emitWrapper(writer, local_indent, namespace);
+                },
+                .container => try content.container.emitZig(allocator, writer, local_indent),
+                .std_code => |stdc| {
+                    _ = try writer.writeByteNTimes(' ', local_indent);
+                    try writer.writeAll(stdc.data);
 
-        for (container.decls) |decl|
-            try decl.emit(allocator, writer, local_indent);
-
-        try writer.writeAll(container.std_code);
+                    try writer.writeAll(switch (stdc.type) {
+                        .field => ",\n",
+                        .decl => ";\n",
+                        else => "\n",
+                    });
+                },
+            };
 
         if (container.name != null) {
             _ = try writer.writeByteNTimes(' ', indent);
@@ -189,11 +79,56 @@ pub const Container = struct {
     }
 
     pub fn emitJs(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
-        for (container.fields) |field|
-            try field.emitJs(allocator, writer, indent);
+        for (container.contents) |content| {
+            switch (content) {
+                .func => {
+                    var namespace = try container.composeNamespace(allocator);
+                    try content.func.emitBinding(writer, indent, namespace);
+                },
+                .container => try content.container.emitJs(allocator, writer, indent),
+                else => {},
+            }
+        }
+    }
 
-        for (container.decls) |decl|
-            try decl.emitJs(allocator, writer, indent);
+    pub fn functionFromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?Function {
+        const field = tree.fullContainerField(node).?;
+
+        if (field.ast.value_expr == 0) {
+            const type_expr = tree.nodes.get(field.ast.type_expr);
+            switch (type_expr.tag) {
+                .fn_proto_simple, .fn_proto_multi => {
+                    return try Function.fromAst(
+                        allocator,
+                        tree,
+                        field.ast.type_expr,
+                        field.ast.main_token,
+                    );
+                },
+                else => {},
+            }
+        }
+        return null;
+    }
+
+    pub fn containerFromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?*Container {
+        const var_decl = tree.fullVarDecl(node).?;
+        // var/const
+        if (var_decl.visib_token) |visib_token| {
+            const visib = tree.tokenSlice(visib_token);
+            if (std.mem.eql(u8, visib, "pub")) {
+                // pub var/const
+                const init_node = tree.nodes.get(var_decl.ast.init_node);
+                switch (init_node.tag) {
+                    .container_decl_trailing, .container_decl_two_trailing => {
+                        return try Container.fromAst(allocator, tree, var_decl.ast.init_node, node);
+                    },
+                    else => {},
+                }
+            }
+        }
+
+        return null;
     }
 
     pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, name_idx: Ast.Node.Index) anyerror!*Container {
@@ -202,42 +137,40 @@ pub const Container = struct {
         var buf: [2]Ast.Node.Index = undefined;
         const container_decl = tree.fullContainerDecl(&buf, node).?;
 
-        var fields: std.ArrayListUnmanaged(*Field) = .{};
-        var decls: std.ArrayListUnmanaged(*Decl) = .{};
-        var std_code: std.ArrayListUnmanaged(u8) = .{};
-        defer fields.deinit(allocator);
-        defer decls.deinit(allocator);
-
         var cont = try allocator.create(Container);
+        var contents: std.ArrayListUnmanaged(Content) = .{};
 
         for (container_decl.ast.members) |decl_idx| {
-            switch (analysis.getDeclType(tree, decl_idx)) {
+            const std_type = analysis.getDeclType(tree, decl_idx);
+            switch (std_type) {
                 // If this decl is a struct field `foo: fn () void,` then consume it.
                 .field => {
-                    var field = try Field.fromAst(allocator, tree, decl_idx);
-                    try fields.append(allocator, field);
-                    field.parent = cont;
-                    continue;
+                    if (try Container.functionFromAst(allocator, tree, decl_idx)) |func| {
+                        try contents.append(allocator, .{ .func = func });
+                        continue;
+                    }
                 },
                 // If this decl is a `pub const foo = struct {};` then consume it
                 .decl => {
-                    var decl = try Decl.fromAst(allocator, tree, decl_idx);
-                    try decls.append(allocator, decl);
-                    decl.parent = cont;
-                    continue;
+                    if (try Container.containerFromAst(allocator, tree, decl_idx)) |container| {
+                        var child = container;
+                        child.parent = cont;
+                        try contents.append(allocator, .{ .container = child });
+                        continue;
+                    }
                 },
-                .other => {
-                    try std_code.appendSlice(allocator, tree.getNodeSource(decl_idx));
-                    continue;
-                },
+                .other => {},
             }
+
+            try contents.append(allocator, .{ .std_code = .{
+                .data = tree.getNodeSource(decl_idx),
+                .type = std_type,
+            } });
         }
 
         cont.* = .{
             .name = name,
-            .fields = try fields.toOwnedSlice(allocator),
-            .decls = try decls.toOwnedSlice(allocator),
-            .std_code = try std_code.toOwnedSlice(allocator),
+            .contents = try contents.toOwnedSlice(allocator),
         };
         return cont;
     }
