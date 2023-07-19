@@ -10,7 +10,7 @@ pub const Container = struct {
     contents: []Content,
 
     pub const Content = union(enum) {
-        func: Function,
+        func: *Function,
         container: *Container,
         std_code: struct {
             type: analysis.DeclType = .other,
@@ -83,6 +83,8 @@ pub const Container = struct {
             switch (content) {
                 .func => {
                     var namespace = try container.composeNamespace(allocator);
+                    defer namespace.deinit(allocator);
+
                     try content.func.emitBinding(writer, indent, namespace);
                 },
                 .container => try content.container.emitJs(allocator, writer, indent),
@@ -91,7 +93,7 @@ pub const Container = struct {
         }
     }
 
-    pub fn functionFromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?Function {
+    pub fn functionFromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?*Function {
         const field = tree.fullContainerField(node).?;
 
         if (field.ast.value_expr == 0) {
@@ -146,6 +148,7 @@ pub const Container = struct {
                 // If this decl is a struct field `foo: fn () void,` then consume it.
                 .field => {
                     if (try Container.functionFromAst(allocator, tree, decl_idx)) |func| {
+                        func.parent = cont;
                         try contents.append(allocator, .{ .func = func });
                         continue;
                     }
@@ -178,6 +181,7 @@ pub const Container = struct {
 
 pub const Function = struct {
     name: []const u8,
+    parent: ?*Container = null,
     return_ty: Type,
     params: []Param,
 
@@ -227,7 +231,14 @@ pub const Function = struct {
         try writer.writeAll(" {\n");
 
         _ = try writer.writeByteNTimes(' ', indent + 4);
-        try writer.writeAll("return sysjs_");
+        try writer.writeAll("return ");
+
+        const is_ret_obj = fun.return_ty.info == .composite_ref;
+        if (is_ret_obj) {
+            try writer.print("{s}{{.id = ", .{fun.return_ty.slice});
+        }
+
+        try writer.writeAll("sysjs_");
         try writer.writeAll(namespace.items);
         try writer.writeAll(fun.name);
         try writer.writeByte('(');
@@ -243,6 +254,7 @@ pub const Function = struct {
             }
         }
 
+        if (is_ret_obj) try writer.writeByte('}');
         try writer.writeAll(");\n");
 
         _ = try writer.writeByteNTimes(' ', indent);
@@ -279,23 +291,40 @@ pub const Function = struct {
 
         _ = try writer.writeByteNTimes(' ', indent + 4);
 
-        var split = std.mem.splitSequence(u8, namespace.items, "_");
-        try writer.writeAll(split.first());
-        while (split.next()) |name| {
-            try writer.writeAll(".");
-            try writer.writeAll(name);
-        }
-        try writer.print("{s}(", .{fun.name});
+        const is_ret_obj = fun.return_ty.info == .composite_ref;
+        const is_const = if (fun.parent) |parent|
+            if (parent.name) |name|
+                std.mem.eql(u8, name, fun.return_ty.slice)
+            else
+                false
+        else
+            false;
+
+        try writer.print("return {s}{s}", .{
+            if (is_ret_obj) "wasmWrapObject(" else "",
+            if (is_const) "new " else "",
+        });
+
+        // If its a constructor, remove the last '_'
+        var end = namespace.items.len;
+        end -= if (is_const) 1 else 0;
+
+        // Replace all '_' with '.' for namespace
+        std.mem.replaceScalar(u8, namespace.items, '_', '.');
+        try writer.writeAll(namespace.items[0..end]);
+
+        try writer.print("{s}(", .{if (!is_const) fun.name else ""});
 
         for (0..fun.params.len) |i| {
             if (i != 0) try writer.writeAll(", ");
             try writer.print("l{d}", .{i});
         }
 
-        try writer.writeAll(")\n}\n");
+        if (is_ret_obj) try writer.writeByte(')');
+        try writer.writeAll(");\n}\n");
     }
 
-    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !Function {
+    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !*Function {
         var param_buf: [1]Ast.Node.Index = undefined;
         const fn_proto = tree.fullFnProto(&param_buf, node_index).?;
 
@@ -313,11 +342,13 @@ pub const Function = struct {
             });
         }
 
-        return Function{
+        var func_obj = try allocator.create(Function);
+        func_obj.* = Function{
             .name = name,
             .return_ty = return_type,
             .params = params.items,
         };
+        return func_obj;
     }
 };
 
@@ -332,6 +363,7 @@ pub const Type = struct {
         void: void,
         bool: void,
         anyopaque: void,
+        composite_ref: void,
     };
 
     pub const Int = struct {
@@ -382,6 +414,7 @@ pub const Type = struct {
                     else => {}, // TODO: one, many
                 }
             },
+            .composite_ref => try writer.writeAll("u32"),
             else => try writer.writeAll(ty.slice),
         }
     }
@@ -499,8 +532,11 @@ pub const Type = struct {
             }
 
             @panic("TODO: error on impossible types");
-        } else {
-            @panic("TODO: non primitive types");
         }
+
+        return Type{
+            .slice = token_slice,
+            .info = .{ .composite_ref = {} },
+        };
     }
 };
