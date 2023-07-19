@@ -8,6 +8,10 @@ pub const console = struct {
     log2: fn (string: []const u8, []const u8) void,
 };
 
+pub const String = struct {
+    new: fn (buf: []const u8) String,
+};
+
 /// doPrint does stuff
 pub fn doPrint() void {
     // use console.log
