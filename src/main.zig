@@ -69,6 +69,11 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                 \\    return textDecoder.decode(wasmGetMemory().slice(ptr, ptr + len));
                 \\}
                 \\
+                \\let wasmObjects = [];
+                \\function wasmWrapObject(obj) {
+                \\    return wasmObjects.push(obj) - 1;
+                \\}
+                \\
                 \\/* Gen */
                 \\
             );
