@@ -72,6 +72,10 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                 \\    return wasmObjects.push(obj) - 1;
                 \\}
                 \\
+                \\function wasmGetObject(id) {
+                \\    return wasmObjects[id];
+                \\}
+                \\
                 \\/* Gen */
                 \\
             );

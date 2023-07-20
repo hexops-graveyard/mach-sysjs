@@ -13,10 +13,26 @@ pub const console = struct {
     }
 };
 
+pub const TextDecoder = struct {
+    extern fn sysjs_TextDecoder_new() u32;
+    pub inline fn new() TextDecoder {
+        return TextDecoder{.id = sysjs_TextDecoder_new()};
+    }
+    extern fn sysjs_TextDecoder_decode(td: u32, str: [*]const u8, str_len: u32) u32;
+    pub inline fn decode(td: TextDecoder, str: []const u8) String {
+        return String{.id = sysjs_TextDecoder_decode(td.id, str.ptr, str.len)};
+    }
+};
+
 pub const String = struct {
+    id: u32,
     extern fn sysjs_String_new(buf: [*]const u8, buf_len: u32) u32;
     pub inline fn new(buf: []const u8) String {
-        return String{.id = sysjs_String_new(buf.ptr, buf.len});
+        return String{.id = sysjs_String_new(buf.ptr, buf.len)};
+    }
+    extern fn sysjs_String_charAt(string: u32, index: u32) u8;
+    pub inline fn charAt(string: String, index: u32) u8 {
+        return sysjs_String_charAt(string.id, index);
     }
 };
 pub fn doPrint() void {

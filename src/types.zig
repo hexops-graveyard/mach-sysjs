@@ -254,8 +254,9 @@ pub const Function = struct {
             }
         }
 
+        try writer.writeByte(')');
         if (is_ret_obj) try writer.writeByte('}');
-        try writer.writeAll(");\n");
+        try writer.writeAll(";\n");
 
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("}\n");
@@ -292,6 +293,7 @@ pub const Function = struct {
         _ = try writer.writeByteNTimes(' ', indent + 4);
 
         const is_ret_obj = fun.return_ty.info == .composite_ref;
+
         const is_const = if (fun.parent) |parent|
             if (parent.name) |name|
                 std.mem.eql(u8, name, fun.return_ty.slice)
@@ -300,23 +302,37 @@ pub const Function = struct {
         else
             false;
 
+        const is_method = if (fun.params.len > 0) if (fun.parent) |parent|
+            if (parent.name) |name|
+                std.mem.eql(u8, name, fun.params[0].type.slice)
+            else
+                false
+        else
+            false else false;
+
         try writer.print("return {s}{s}", .{
             if (is_ret_obj) "wasmWrapObject(" else "",
             if (is_const) "new " else "",
         });
 
-        // If its a constructor, remove the last '_'
-        var end = namespace.items.len;
-        end -= if (is_const) 1 else 0;
+        var arg_index: u32 = 0;
+        if (is_method) {
+            try writer.writeAll("l0.");
+            arg_index = 1;
+        } else {
+            // If its a constructor, remove the last '_'
+            var end = namespace.items.len;
+            end -= if (is_const) 1 else 0;
 
-        // Replace all '_' with '.' for namespace
-        std.mem.replaceScalar(u8, namespace.items, '_', '.');
-        try writer.writeAll(namespace.items[0..end]);
+            // Replace all '_' with '.' for namespace
+            std.mem.replaceScalar(u8, namespace.items, '_', '.');
+            try writer.writeAll(namespace.items[0..end]);
+        }
 
         try writer.print("{s}(", .{if (!is_const) fun.name else ""});
 
-        for (0..fun.params.len) |i| {
-            if (i != 0) try writer.writeAll(", ");
+        for (arg_index..fun.params.len) |i| {
+            if (i != arg_index) try writer.writeAll(", ");
             try writer.print("l{d}", .{i});
         }
 
@@ -427,6 +443,7 @@ pub const Type = struct {
                 .Slice => try std.fmt.format(writer, "{s}.ptr, {s}.len", .{ arg_name, arg_name }),
                 else => {}, // TODO: one, many
             },
+            .composite_ref => try writer.print("{s}.id", .{arg_name}),
             else => try writer.writeAll(arg_name),
         }
     }
@@ -448,6 +465,9 @@ pub const Type = struct {
                     try writer.print("const l{d} = wasmGetSlice({s}, {s}_len);\n", .{ index, param_name, param_name });
                 },
                 else => {}, // TODO: one, many
+            },
+            .composite_ref => {
+                try writer.print("const l{d} = wasmGetObject({s});\n", .{ index, param_name });
             },
             else => try writer.print("const l{d} = {s};\n", .{ index, param_name }),
         }
