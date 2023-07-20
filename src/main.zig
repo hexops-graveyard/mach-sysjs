@@ -55,8 +55,6 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
 
         fn generateJsScaffold(gen: *@This()) !void {
             try gen.js.writeAll(
-                \\const textDecoder = new TextDecoder('utf-8');
-                \\
                 \\const wasmMemoryBuf = undefined;
                 \\function wasmGetMemory() {
                 \\    if (wasmMemoryBuf === undefined || wasmMemoryBuf !== wasm.memory.buffer) {
@@ -65,8 +63,8 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                 \\    return wasmMemoryBuf;
                 \\}
                 \\
-                \\function wasmGetString(ptr, len) {
-                \\    return textDecoder.decode(wasmGetMemory().slice(ptr, ptr + len));
+                \\function wasmGetSlice(ptr, len) {
+                \\    return wasmGetMemory().slice(ptr, ptr + len);
                 \\}
                 \\
                 \\let wasmObjects = [];
