@@ -445,7 +445,7 @@ pub const Type = struct {
         switch (ty.info) {
             .ptr => |ptr| switch (ptr.size) {
                 .Slice => {
-                    try writer.print("const l{d} = wasmGetString({s}, {s}_len);\n", .{ index, param_name, param_name });
+                    try writer.print("const l{d} = wasmGetSlice({s}, {s}_len);\n", .{ index, param_name, param_name });
                 },
                 else => {}, // TODO: one, many
             },
