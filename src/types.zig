@@ -7,7 +7,8 @@ pub const Namespace = std.ArrayListUnmanaged(u8);
 pub const Container = struct {
     name: ?[]const u8 = null,
     parent: ?*Container = null,
-    contents: []Content,
+    contents: std.ArrayListUnmanaged(Content) = .{},
+    types: std.ArrayListUnmanaged(Type) = .{},
 
     pub const Content = union(enum) {
         func: *Function,
@@ -49,7 +50,7 @@ pub const Container = struct {
             local_indent += 4;
         }
 
-        for (container.contents) |content|
+        for (container.contents.items) |content|
             switch (content) {
                 .func => {
                     var namespace = try container.composeNamespace(allocator);
@@ -79,7 +80,7 @@ pub const Container = struct {
     }
 
     pub fn emitJs(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) !void {
-        for (container.contents) |content| {
+        for (container.contents.items) |content| {
             switch (content) {
                 .func => {
                     var namespace = try container.composeNamespace(allocator);
@@ -93,27 +94,40 @@ pub const Container = struct {
         }
     }
 
-    pub fn functionFromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?*Function {
+    pub fn addField(
+        container: *Container,
+        allocator: std.mem.Allocator,
+        tree: Ast,
+        node: Ast.Node.Index,
+    ) !bool {
         const field = tree.fullContainerField(node).?;
 
         if (field.ast.value_expr == 0) {
             const type_expr = tree.nodes.get(field.ast.type_expr);
             switch (type_expr.tag) {
                 .fn_proto_simple, .fn_proto_multi => {
-                    return try Function.fromAst(
+                    var func = try Function.fromAst(
                         allocator,
                         tree,
                         field.ast.type_expr,
                         field.ast.main_token,
                     );
+                    func.parent = container;
+                    try container.contents.append(allocator, .{ .func = func });
+                    return true;
                 },
                 else => {},
             }
         }
-        return null;
+        return false;
     }
 
-    pub fn containerFromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index) !?*Container {
+    pub fn addDecl(
+        container: *Container,
+        allocator: std.mem.Allocator,
+        tree: Ast,
+        node: Ast.Node.Index,
+    ) !bool {
         const var_decl = tree.fullVarDecl(node).?;
         // var/const
         if (var_decl.visib_token) |visib_token| {
@@ -122,59 +136,73 @@ pub const Container = struct {
                 // pub var/const
                 const init_node = tree.nodes.get(var_decl.ast.init_node);
                 switch (init_node.tag) {
-                    .container_decl_trailing, .container_decl_two_trailing => {
-                        return try Container.fromAst(allocator, tree, var_decl.ast.init_node, node);
+                    .container_decl,
+                    .container_decl_two,
+                    .container_decl_trailing,
+                    .container_decl_two_trailing,
+                    => {
+                        var buf: [2]Ast.Node.Index = undefined;
+                        const container_decl = tree.fullContainerDecl(&buf, var_decl.ast.init_node).?;
+
+                        const name = if (analysis.getDeclNameToken(tree, node)) |token|
+                            tree.tokenSlice(token)
+                        else
+                            null;
+
+                        if (container_decl.layout_token) |lt| {
+                            if (std.mem.eql(u8, tree.tokenSlice(lt), "extern")) {
+                                var comp_ty = try Type.compositeFromAst(allocator, tree, container_decl, var_decl.ast.init_node);
+                                try container.types.append(allocator, comp_ty);
+                            }
+
+                            return false;
+                        }
+
+                        var cont = try Container.fromAst(allocator, tree, container_decl);
+                        cont.name = name;
+                        cont.parent = container;
+                        try container.contents.append(allocator, .{ .container = cont });
+
+                        return true;
                     },
                     else => {},
                 }
             }
         }
 
-        return null;
+        return false;
     }
 
-    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node: Ast.Node.Index, name_idx: Ast.Node.Index) anyerror!*Container {
-        const name = if (analysis.getDeclNameToken(tree, name_idx)) |token| tree.tokenSlice(token) else null;
-
-        var buf: [2]Ast.Node.Index = undefined;
-        const container_decl = tree.fullContainerDecl(&buf, node).?;
-
+    pub fn fromAst(
+        allocator: std.mem.Allocator,
+        tree: Ast,
+        container_decl: Ast.full.ContainerDecl,
+    ) anyerror!*Container {
         var cont = try allocator.create(Container);
-        var contents: std.ArrayListUnmanaged(Content) = .{};
+        cont.* = Container{};
 
         for (container_decl.ast.members) |decl_idx| {
             const std_type = analysis.getDeclType(tree, decl_idx);
             switch (std_type) {
                 // If this decl is a struct field `foo: fn () void,` then consume it.
                 .field => {
-                    if (try Container.functionFromAst(allocator, tree, decl_idx)) |func| {
-                        func.parent = cont;
-                        try contents.append(allocator, .{ .func = func });
+                    if (try cont.addField(allocator, tree, decl_idx))
                         continue;
-                    }
                 },
                 // If this decl is a `pub const foo = struct {};` then consume it
                 .decl => {
-                    if (try Container.containerFromAst(allocator, tree, decl_idx)) |container| {
-                        var child = container;
-                        child.parent = cont;
-                        try contents.append(allocator, .{ .container = child });
+                    if (try cont.addDecl(allocator, tree, decl_idx))
                         continue;
-                    }
                 },
                 .other => {},
             }
 
-            try contents.append(allocator, .{ .std_code = .{
+            try cont.contents.append(allocator, .{ .std_code = .{
                 .data = tree.getNodeSource(decl_idx),
                 .type = std_type,
             } });
         }
 
-        cont.* = .{
-            .name = name,
-            .contents = try contents.toOwnedSlice(allocator),
-        };
         return cont;
     }
 };
@@ -380,6 +408,7 @@ pub const Type = struct {
         bool: void,
         anyopaque: void,
         composite_ref: void,
+        composite: Composite,
     };
 
     pub const Int = struct {
@@ -397,6 +426,15 @@ pub const Type = struct {
         size: std.builtin.Type.Pointer.Size,
         is_const: bool,
         base_ty: *Type,
+    };
+
+    pub const Composite = struct {
+        fields: []Field,
+
+        pub const Field = struct {
+            name: []const u8,
+            type: *Type,
+        };
     };
 
     fn printParamName(writer: anytype, param_name: ?[]const u8, extension: ?[]const u8) !void {
@@ -558,5 +596,37 @@ pub const Type = struct {
             .slice = token_slice,
             .info = .{ .composite_ref = {} },
         };
+    }
+
+    pub fn compositeFromAst(
+        allocator: std.mem.Allocator,
+        tree: Ast,
+        container: Ast.full.ContainerDecl,
+        init_node: Ast.Node.Index,
+    ) !Type {
+        var fields: std.ArrayListUnmanaged(Composite.Field) = .{};
+
+        for (container.ast.members) |decl_idx| {
+            const std_type = analysis.getDeclType(tree, decl_idx);
+            switch (std_type) {
+                .field => {
+                    const field = tree.fullContainerField(decl_idx);
+                    const name = tree.tokenSlice(field.?.ast.main_token);
+                    const ty = try Type.fromAst(allocator, tree, field.?.ast.type_expr);
+                    var ty_alloc = try allocator.create(Type);
+                    ty_alloc.* = ty;
+
+                    try fields.append(allocator, .{
+                        .name = name,
+                        .type = ty_alloc,
+                    });
+                },
+                else => {}, // TODO
+            }
+        }
+
+        return Type{ .slice = tree.getNodeSource(init_node), .info = .{
+            .composite = .{ .fields = try fields.toOwnedSlice(allocator) },
+        } };
     }
 };
