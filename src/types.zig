@@ -2,13 +2,13 @@ const std = @import("std");
 const Ast = std.zig.Ast;
 const analysis = @import("analysis.zig");
 
-pub const Namespace = std.ArrayListUnmanaged(u8);
-
 pub const Container = struct {
     name: ?[]const u8 = null,
     parent: ?*Container = null,
     contents: std.ArrayListUnmanaged(Content) = .{},
     types: std.ArrayListUnmanaged(Type) = .{},
+
+    const Namespace = std.ArrayListUnmanaged(u8);
 
     pub const Content = union(enum) {
         func: *Function,
@@ -93,118 +93,6 @@ pub const Container = struct {
             }
         }
     }
-
-    pub fn addField(
-        container: *Container,
-        allocator: std.mem.Allocator,
-        tree: Ast,
-        node: Ast.Node.Index,
-    ) !bool {
-        const field = tree.fullContainerField(node).?;
-
-        if (field.ast.value_expr == 0) {
-            const type_expr = tree.nodes.get(field.ast.type_expr);
-            switch (type_expr.tag) {
-                .fn_proto_simple, .fn_proto_multi => {
-                    var func = try Function.fromAst(
-                        allocator,
-                        tree,
-                        field.ast.type_expr,
-                        field.ast.main_token,
-                    );
-                    func.parent = container;
-                    try container.contents.append(allocator, .{ .func = func });
-                    return true;
-                },
-                else => {},
-            }
-        }
-        return false;
-    }
-
-    pub fn addDecl(
-        container: *Container,
-        allocator: std.mem.Allocator,
-        tree: Ast,
-        node: Ast.Node.Index,
-    ) !bool {
-        const var_decl = tree.fullVarDecl(node).?;
-        // var/const
-        if (var_decl.visib_token) |visib_token| {
-            const visib = tree.tokenSlice(visib_token);
-            if (std.mem.eql(u8, visib, "pub")) {
-                // pub var/const
-                const init_node = tree.nodes.get(var_decl.ast.init_node);
-                switch (init_node.tag) {
-                    .container_decl,
-                    .container_decl_two,
-                    .container_decl_trailing,
-                    .container_decl_two_trailing,
-                    => {
-                        var buf: [2]Ast.Node.Index = undefined;
-                        const container_decl = tree.fullContainerDecl(&buf, var_decl.ast.init_node).?;
-
-                        const name = if (analysis.getDeclNameToken(tree, node)) |token|
-                            tree.tokenSlice(token)
-                        else
-                            null;
-
-                        if (container_decl.layout_token) |lt| {
-                            if (std.mem.eql(u8, tree.tokenSlice(lt), "extern")) {
-                                var comp_ty = try Type.compositeFromAst(allocator, tree, container_decl, var_decl.ast.init_node);
-                                try container.types.append(allocator, comp_ty);
-                            }
-
-                            return false;
-                        }
-
-                        var cont = try Container.fromAst(allocator, tree, container_decl);
-                        cont.name = name;
-                        cont.parent = container;
-                        try container.contents.append(allocator, .{ .container = cont });
-
-                        return true;
-                    },
-                    else => {},
-                }
-            }
-        }
-
-        return false;
-    }
-
-    pub fn fromAst(
-        allocator: std.mem.Allocator,
-        tree: Ast,
-        container_decl: Ast.full.ContainerDecl,
-    ) anyerror!*Container {
-        var cont = try allocator.create(Container);
-        cont.* = Container{};
-
-        for (container_decl.ast.members) |decl_idx| {
-            const std_type = analysis.getDeclType(tree, decl_idx);
-            switch (std_type) {
-                // If this decl is a struct field `foo: fn () void,` then consume it.
-                .field => {
-                    if (try cont.addField(allocator, tree, decl_idx))
-                        continue;
-                },
-                // If this decl is a `pub const foo = struct {};` then consume it
-                .decl => {
-                    if (try cont.addDecl(allocator, tree, decl_idx))
-                        continue;
-                },
-                .other => {},
-            }
-
-            try cont.contents.append(allocator, .{ .std_code = .{
-                .data = tree.getNodeSource(decl_idx),
-                .type = std_type,
-            } });
-        }
-
-        return cont;
-    }
 };
 
 pub const Function = struct {
@@ -222,7 +110,7 @@ pub const Function = struct {
         type: Type,
     };
 
-    pub fn emitExtern(fun: Function, writer: anytype, indent: u8, namespace: Namespace) !void {
+    pub fn emitExtern(fun: Function, writer: anytype, indent: u8, namespace: Container.Namespace) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.writeAll("extern fn sysjs_");
         try writer.writeAll(namespace.items);
@@ -239,7 +127,7 @@ pub const Function = struct {
         try writer.writeAll(";\n");
     }
 
-    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8, namespace: Namespace) !void {
+    pub fn emitWrapper(fun: Function, writer: anytype, indent: u8, namespace: Container.Namespace) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.print("pub inline fn {s}(", .{fun.name});
 
@@ -290,7 +178,7 @@ pub const Function = struct {
         try writer.writeAll("}\n");
     }
 
-    pub fn emitBinding(fun: Function, writer: anytype, indent: u8, namespace: Namespace) !void {
+    pub fn emitBinding(fun: Function, writer: anytype, indent: u8, namespace: Container.Namespace) !void {
         _ = try writer.writeByteNTimes(' ', indent);
         try writer.print("export function sysjs_{s}{s}(", .{ namespace.items, fun.name });
 
@@ -366,33 +254,6 @@ pub const Function = struct {
 
         if (is_ret_obj) try writer.writeByte(')');
         try writer.writeAll(");\n}\n");
-    }
-
-    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, node_index: Ast.TokenIndex, name_token: Ast.TokenIndex) !*Function {
-        var param_buf: [1]Ast.Node.Index = undefined;
-        const fn_proto = tree.fullFnProto(&param_buf, node_index).?;
-
-        const name = tree.tokenSlice(name_token);
-        const return_type = try Type.fromAst(allocator, tree, fn_proto.ast.return_type);
-
-        var params: std.ArrayListUnmanaged(Param) = .{};
-
-        var params_iter = fn_proto.iterate(&tree);
-        var i: usize = 0;
-        while (params_iter.next()) |param| : (i += 1) {
-            try params.append(allocator, .{
-                .name = if (param.name_token) |nt| tree.tokenSlice(nt) else null,
-                .type = try Type.fromAst(allocator, tree, param.type_expr),
-            });
-        }
-
-        var func_obj = try allocator.create(Function);
-        func_obj.* = Function{
-            .name = name,
-            .return_ty = return_type,
-            .params = params.items,
-        };
-        return func_obj;
     }
 };
 
@@ -509,124 +370,5 @@ pub const Type = struct {
             },
             else => try writer.print("const l{d} = {s};\n", .{ index, param_name }),
         }
-    }
-
-    pub fn fromAst(allocator: std.mem.Allocator, tree: Ast, index: Ast.Node.Index) !Type {
-        const token_slice = tree.getNodeSource(index);
-        if (tree.fullPtrType(index)) |ptr| {
-            const child_ty = try Type.fromAst(allocator, tree, ptr.ast.child_type);
-            var base_ty = try allocator.create(Type);
-            base_ty.* = child_ty;
-
-            return Type{
-                .slice = token_slice,
-                .info = .{ .ptr = Ptr{
-                    .size = ptr.size,
-                    .is_const = ptr.const_token != null,
-                    .base_ty = base_ty,
-                } },
-            };
-        }
-
-        if (std.zig.primitives.isPrimitive(token_slice)) {
-            const signedness: ?Int.Signedness = switch (token_slice[0]) {
-                'u' => .unsigned,
-                'i' => .signed,
-                else => null,
-            };
-
-            const float = token_slice[0] == 'f';
-            const c_types = token_slice[0] == 'c' and token_slice[1] == '_';
-
-            const size: ?u16 = std.fmt.parseInt(u16, token_slice[1..], 10) catch |err| blk: {
-                switch (err) {
-                    error.InvalidCharacter => break :blk null,
-                    else => |e| return e,
-                }
-            };
-
-            if (signedness) |sig| {
-                // iXX or uXX
-                if (size) |sz| {
-                    return Type{
-                        .slice = token_slice,
-                        .info = .{
-                            .int = Int{
-                                .signedness = sig,
-                                .bits = sz,
-                            },
-                        },
-                    };
-                } else {
-                    // TODO: usize or isize
-                }
-            }
-
-            if (float and size != null) {
-                // fXX
-                return Type{
-                    .slice = token_slice,
-                    .info = .{
-                        .float = Float{
-                            .bits = size.?,
-                        },
-                    },
-                };
-            }
-
-            if (c_types) {
-                // TODO c types
-            }
-
-            inline for (std.meta.fields(Type.TypeInfo)) |field| {
-                if (field.type == void) {
-                    if (std.mem.eql(u8, token_slice, field.name)) {
-                        return Type{
-                            .slice = token_slice,
-                            .info = @unionInit(TypeInfo, field.name, {}),
-                        };
-                    }
-                }
-            }
-
-            @panic("TODO: error on impossible types");
-        }
-
-        return Type{
-            .slice = token_slice,
-            .info = .{ .composite_ref = {} },
-        };
-    }
-
-    pub fn compositeFromAst(
-        allocator: std.mem.Allocator,
-        tree: Ast,
-        container: Ast.full.ContainerDecl,
-        init_node: Ast.Node.Index,
-    ) !Type {
-        var fields: std.ArrayListUnmanaged(Composite.Field) = .{};
-
-        for (container.ast.members) |decl_idx| {
-            const std_type = analysis.getDeclType(tree, decl_idx);
-            switch (std_type) {
-                .field => {
-                    const field = tree.fullContainerField(decl_idx);
-                    const name = tree.tokenSlice(field.?.ast.main_token);
-                    const ty = try Type.fromAst(allocator, tree, field.?.ast.type_expr);
-                    var ty_alloc = try allocator.create(Type);
-                    ty_alloc.* = ty;
-
-                    try fields.append(allocator, .{
-                        .name = name,
-                        .type = ty_alloc,
-                    });
-                },
-                else => {}, // TODO
-            }
-        }
-
-        return Type{ .slice = tree.getNodeSource(init_node), .info = .{
-            .composite = .{ .fields = try fields.toOwnedSlice(allocator) },
-        } };
     }
 };
