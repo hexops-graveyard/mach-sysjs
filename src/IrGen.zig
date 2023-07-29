@@ -13,23 +13,25 @@ allocator: std.mem.Allocator,
 root: *Container = undefined,
 
 pub fn addRoot(gen: *IrGen) !void {
-    gen.root = try gen.addContainer(gen.ast.containerDeclRoot());
+    gen.root = try gen.addContainer(null, gen.ast.containerDeclRoot(), null);
 }
 
 fn addContainer(
     gen: IrGen,
+    parent: ?*Container,
     container_decl: Ast.full.ContainerDecl,
+    name: ?[]const u8,
 ) anyerror!*Container {
     var cont = try gen.allocator.create(Container);
-    cont.* = Container{};
+    cont.* = Container{ .name = name, .parent = parent };
 
     for (container_decl.ast.members) |decl_idx| {
         const std_type = analysis.getDeclType(gen.ast, decl_idx);
         switch (std_type) {
             // If this decl is a struct field `foo: fn () void,` then consume it.
             .field => {
-                if (try gen.addContainerField(cont, decl_idx))
-                    continue;
+                try gen.addContainerField(cont, decl_idx);
+                continue;
             },
             // If this decl is a `pub const foo = struct {};` then consume it
             .decl => {
@@ -52,24 +54,32 @@ fn addContainerField(
     gen: IrGen,
     container: *Container,
     node: Ast.Node.Index,
-) !bool {
+) !void {
     const field = gen.ast.fullContainerField(node).?;
 
     if (field.ast.value_expr == 0) {
         const type_expr = gen.ast.nodes.get(field.ast.type_expr);
         switch (type_expr.tag) {
             .fn_proto_simple, .fn_proto_multi => {
-                try gen.addFunction(
-                    container,
-                    field.ast.type_expr,
-                    field.ast.main_token,
-                );
-                return true;
+                if (container.val_type != .struct_val) {
+                    try gen.addFunction(
+                        container,
+                        field.ast.type_expr,
+                        field.ast.main_token,
+                    );
+                    return;
+                }
             },
             else => {},
         }
     }
-    return false;
+
+    try container.fields.append(gen.allocator, .{
+        .name = gen.ast.tokenSlice(field.ast.main_token),
+        .type = try gen.makeType(field.ast.type_expr),
+    });
+
+    container.val_type = .struct_val;
 }
 
 fn addContainerDecl(
@@ -98,18 +108,7 @@ fn addContainerDecl(
                     else
                         null;
 
-                    if (container_decl.layout_token) |lt| {
-                        if (std.mem.eql(u8, gen.ast.tokenSlice(lt), "extern")) {
-                            var comp_ty = try gen.makeCompositeType(container_decl, var_decl.ast.init_node);
-                            try container.types.append(gen.allocator, comp_ty);
-                        }
-
-                        return false;
-                    }
-
-                    var cont = try gen.addContainer(container_decl);
-                    cont.name = name;
-                    cont.parent = container;
+                    var cont = try gen.addContainer(container, container_decl, name);
                     try container.contents.append(gen.allocator, .{ .container = cont });
 
                     return true;
@@ -146,6 +145,16 @@ fn addFunction(gen: IrGen, container: *Container, node_index: Ast.TokenIndex, na
         .return_ty = return_type,
         .params = params.items,
         .parent = container,
+        .val_ty = if (container.name) |coname|
+            if (std.mem.eql(u8, coname, return_type.slice))
+                .constructor
+            else if (params.items.len > 0 and
+                std.mem.eql(u8, coname, params.items[0].type.slice))
+                .method
+            else
+                .none
+        else
+            .none,
     };
 
     try container.contents.append(gen.allocator, .{ .func = func_obj });

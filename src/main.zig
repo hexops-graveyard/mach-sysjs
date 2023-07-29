@@ -56,6 +56,7 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
 
             try gen.generateJsScaffold();
             try irgen.root.emitZig(gen.allocator, gen.zig, 0);
+            try irgen.root.emitExtern(gen.allocator, gen.zig, 0);
             try irgen.root.emitJs(gen.allocator, gen.js, 0);
         }
 
