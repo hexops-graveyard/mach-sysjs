@@ -7,6 +7,8 @@ pub const Container = struct {
     parent: ?*Container = null,
     contents: std.ArrayListUnmanaged(Content) = .{},
     types: std.ArrayListUnmanaged(Type) = .{},
+    fields: std.ArrayListUnmanaged(Type.Composite.Field) = .{},
+    val_type: enum { namespace, struct_val } = .namespace,
 
     const Namespace = std.ArrayListUnmanaged(u8);
 
@@ -50,6 +52,14 @@ pub const Container = struct {
             local_indent += 4;
         }
 
+        for (container.fields.items) |field| {
+            try writer.writeByteNTimes(' ', local_indent);
+            try field.type.emitParam(writer, field.name);
+            try writer.writeAll(",\n");
+        }
+
+        try writer.writeByte('\n');
+
         for (container.contents.items) |content|
             switch (content) {
                 .func => {
@@ -60,13 +70,80 @@ pub const Container = struct {
                     try fun.emitExtern(writer, local_indent, namespace);
                     try fun.emitWrapper(writer, local_indent, namespace);
                 },
-                .container => try content.container.emitZig(allocator, writer, local_indent),
+                .container => {
+                    try content.container.emitZig(allocator, writer, local_indent);
+                    try content.container.emitExtern(allocator, writer, local_indent);
+                },
                 .std_code => |stdc| {
                     _ = try writer.writeByteNTimes(' ', local_indent);
                     try writer.writeAll(stdc.data);
 
                     try writer.writeAll(switch (stdc.type) {
-                        .field => ",\n",
+                        .field => unreachable,
+                        .decl => ";\n",
+                        else => "\n",
+                    });
+                },
+            };
+
+        if (container.name) |n| {
+            if (container.val_type == .struct_val) {
+                try writer.writeByteNTimes(' ', local_indent);
+                try writer.print("pub fn toExtern(s: {s}) C{s} {{\n", .{ n, n });
+                try writer.writeByteNTimes(' ', local_indent + 4);
+                try writer.print("return C{s}{{\n", .{n});
+
+                for (container.fields.items) |field| {
+                    try writer.writeByteNTimes(' ', local_indent + 8);
+                    try writer.print(".{s} = s.{s},\n", .{ field.name, field.name });
+                }
+
+                try writer.writeByteNTimes(' ', local_indent + 4);
+                try writer.writeAll("};\n");
+
+                try writer.writeByteNTimes(' ', local_indent);
+                try writer.writeAll("}\n");
+            }
+
+            _ = try writer.writeByteNTimes(' ', indent);
+            _ = try writer.write("};\n");
+        }
+    }
+
+    pub fn emitExtern(container: Container, allocator: std.mem.Allocator, writer: anytype, indent: u8) anyerror!void {
+        if (container.val_type == .namespace)
+            return;
+
+        _ = try writer.writeByte('\n');
+
+        var local_indent = indent;
+        if (container.name) |n| {
+            _ = try writer.writeByteNTimes(' ', indent);
+            try std.fmt.format(writer, "pub const C{s} = extern struct {{\n", .{n});
+            local_indent += 4;
+        }
+
+        for (container.fields.items) |field| {
+            try writer.writeByteNTimes(' ', local_indent);
+            try field.type.emitExternParam(writer, field.name);
+            try writer.writeAll(",\n");
+        }
+
+        try writer.writeByte('\n');
+
+        for (container.contents.items) |content|
+            switch (content) {
+                .func => {},
+                .container => {
+                    try content.container.emitZig(allocator, writer, local_indent);
+                    try content.container.emitExtern(allocator, writer, local_indent);
+                },
+                .std_code => |stdc| {
+                    _ = try writer.writeByteNTimes(' ', local_indent);
+                    try writer.writeAll(stdc.data);
+
+                    try writer.writeAll(switch (stdc.type) {
+                        .field => unreachable,
                         .decl => ";\n",
                         else => "\n",
                     });
@@ -100,6 +177,7 @@ pub const Function = struct {
     parent: ?*Container = null,
     return_ty: Type,
     params: []Param,
+    val_ty: enum { constructor, method, none } = .none,
 
     // No. of parameters in zig's self hosted wasm backend is limited to maxInt(u32).
     // The actual number of limit is however runtime implementation defined.
@@ -209,22 +287,8 @@ pub const Function = struct {
         _ = try writer.writeByteNTimes(' ', indent + 4);
 
         const is_ret_obj = fun.return_ty.info == .composite_ref;
-
-        const is_const = if (fun.parent) |parent|
-            if (parent.name) |name|
-                std.mem.eql(u8, name, fun.return_ty.slice)
-            else
-                false
-        else
-            false;
-
-        const is_method = if (fun.params.len > 0) if (fun.parent) |parent|
-            if (parent.name) |name|
-                std.mem.eql(u8, name, fun.params[0].type.slice)
-            else
-                false
-        else
-            false else false;
+        const is_const = fun.val_ty == .constructor;
+        const is_method = fun.val_ty == .method;
 
         try writer.print("return {s}{s}", .{
             if (is_ret_obj) "wasmWrapObject(" else "",
@@ -294,7 +358,7 @@ pub const Type = struct {
 
         pub const Field = struct {
             name: []const u8,
-            type: *Type,
+            type: Type,
         };
     };
 
