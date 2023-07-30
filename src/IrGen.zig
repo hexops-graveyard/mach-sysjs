@@ -23,7 +23,18 @@ fn addContainer(
     name: ?[]const u8,
 ) anyerror!*Container {
     var cont = try gen.allocator.create(Container);
-    cont.* = Container{ .name = name, .parent = parent };
+
+    const is_struct_bindings = (name != null and std.mem.eql(u8, name.?, "bindings"));
+    const is_parent_bindings = (parent != null and parent.?.val_type == .namespace);
+
+    cont.* = Container{
+        .name = if (is_struct_bindings) null else name,
+        .parent = parent,
+        .val_type = if (is_parent_bindings or is_struct_bindings)
+            .namespace
+        else
+            .struct_val,
+    };
 
     for (container_decl.ast.members) |decl_idx| {
         const std_type = analysis.getDeclType(gen.ast, decl_idx);
@@ -45,6 +56,32 @@ fn addContainer(
             .data = gen.ast.getNodeSource(decl_idx),
             .type = std_type,
         } });
+    }
+
+    if (cont.val_type == .namespace) {
+        const emit_id_field: bool = blk: {
+            for (cont.contents.items) |content| {
+                switch (content) {
+                    .func => |func| if (func.val_ty != .none)
+                        break :blk true
+                    else
+                        continue,
+                    else => continue,
+                }
+            }
+            break :blk false;
+        };
+
+        if (emit_id_field) {
+            try cont.fields.append(gen.allocator, .{
+                .name = "id",
+                .type = .{
+                    .slice = "u32",
+
+                    .info = .{ .int = .{ .bits = 32, .signedness = .unsigned } },
+                },
+            });
+        }
     }
 
     return cont;
@@ -78,8 +115,6 @@ fn addContainerField(
         .name = gen.ast.tokenSlice(field.ast.main_token),
         .type = try gen.makeType(field.ast.type_expr),
     });
-
-    container.val_type = .struct_val;
 }
 
 fn addContainerDecl(
