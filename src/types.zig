@@ -8,7 +8,7 @@ pub const Container = struct {
     contents: std.ArrayListUnmanaged(Content) = .{},
     types: std.ArrayListUnmanaged(Type) = .{},
     fields: std.ArrayListUnmanaged(Type.Composite.Field) = .{},
-    val_type: enum { namespace, struct_val } = .namespace,
+    val_type: enum { namespace, struct_val } = .struct_val,
 
     const Namespace = std.ArrayListUnmanaged(u8);
 
@@ -95,7 +95,7 @@ pub const Container = struct {
 
                 for (container.fields.items) |field| {
                     try writer.writeByteNTimes(' ', local_indent + 8);
-                    try writer.print(".{s} = s.{s},\n", .{ field.name, field.name });
+                    try field.type.emitExternField(writer, field.name, "s");
                 }
 
                 try writer.writeByteNTimes(' ', local_indent + 4);
@@ -408,6 +408,19 @@ pub const Type = struct {
             },
             .composite_ref => try writer.print("{s}.id", .{arg_name}),
             else => try writer.writeAll(arg_name),
+        }
+    }
+
+    pub fn emitExternField(ty: Type, writer: anytype, field_name: []const u8, struct_name: []const u8) !void {
+        switch (ty.info) {
+            .ptr => |ptr| switch (ptr.size) {
+                .Slice => try writer.print(
+                    ".{s} = {s}.{s}.ptr, .{s}_len = {s}.{s}.len,\n",
+                    .{ field_name, struct_name, field_name, field_name, struct_name, field_name },
+                ),
+                else => {}, // TODO: one, many
+            },
+            else => try writer.print(".{s} = {s}.{s},\n", .{ field_name, struct_name, field_name }),
         }
     }
 
