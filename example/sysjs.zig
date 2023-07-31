@@ -18,6 +18,10 @@ pub const bindings = struct {
         new: fn (buf: []const u8) String,
         charAt: fn (string: String, index: u32) u8,
     };
+
+    pub const SomeClass = struct {
+        someFunc: fn (str: TestingValueStructs) void,
+    };
 };
 
 pub const TestingValueStructs = struct {

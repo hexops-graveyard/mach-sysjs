@@ -47,3 +47,11 @@ export function sysjs_String_charAt(string, index) {
     const l1 = index;
     return l0.charAt(l1);
 }
+export function sysjs_SomeClass_someFunc(str) {
+    const l0 = {
+wasmGetMemory().getU32(str + 0, true),
+wasmGetSlice(str + 32, wasmGetMemory().getU32(str + 32 + 32, true)),
+Boolean(wasmGetMemory().getU8(str + 96, true)),
+};
+    return SomeClass.someFunc(l0);
+}

@@ -332,9 +332,9 @@ pub const Type = struct {
         void: void,
         bool: void,
         anyopaque: void,
-        composite_ref: void,
         name_ref: void,
-        composite: Composite,
+        composite_ref: void,
+        container_value: *Container,
     };
 
     pub const Int = struct {
@@ -363,6 +363,15 @@ pub const Type = struct {
         };
     };
 
+    pub fn getJsSize(ty: Type) usize {
+        switch (ty.info) {
+            .int => |int| return std.math.powi(usize, 2, std.math.log2_int_ceil(usize, int.bits)) catch unreachable,
+            .ptr => return 64,
+            .bool => return 8,
+            else => return 0,
+        }
+    }
+
     fn printParamName(writer: anytype, param_name: ?[]const u8, extension: ?[]const u8) !void {
         if (param_name) |param| {
             try writer.writeAll(param);
@@ -373,7 +382,11 @@ pub const Type = struct {
     // Emits parameters for functions in zig's format.
     pub fn emitParam(ty: Type, writer: anytype, param_name: ?[]const u8) !void {
         try printParamName(writer, param_name, null);
-        try writer.writeAll(ty.slice);
+
+        switch (ty.info) {
+            .container_value => try writer.print("C{s}", .{ty.slice}),
+            else => try writer.writeAll(ty.slice),
+        }
     }
 
     // Emits parameters for functions, but in their 'extern' form.
@@ -395,6 +408,7 @@ pub const Type = struct {
                 }
             },
             .composite_ref => try writer.writeAll("u32"),
+            .container_value => try writer.print("C{s}", .{ty.slice}),
             else => try writer.writeAll(ty.slice),
         }
     }
@@ -436,17 +450,47 @@ pub const Type = struct {
     }
 
     pub fn emitBindingGet(ty: Type, writer: anytype, param_name: []const u8, index: usize) !void {
+        try writer.print("const l{d} = ", .{index});
         switch (ty.info) {
             .ptr => |ptr| switch (ptr.size) {
-                .Slice => {
-                    try writer.print("const l{d} = wasmGetSlice({s}, {s}_len);\n", .{ index, param_name, param_name });
-                },
+                .Slice => try writer.print("wasmGetSlice({s}, {s}_len)", .{ param_name, param_name }),
                 else => {}, // TODO: one, many
             },
             .composite_ref => {
-                try writer.print("const l{d} = wasmGetObject({s});\n", .{ index, param_name });
+                try writer.print("wasmGetObject({s})", .{param_name});
             },
-            else => try writer.print("const l{d} = {s};\n", .{ index, param_name }),
+            .container_value => |container| {
+                try writer.writeAll("{\n");
+                try ty.containerBinding(writer, container, param_name);
+                try writer.writeAll("}");
+            },
+            else => try writer.print("{s}", .{param_name}),
+        }
+
+        try writer.writeAll(";\n");
+    }
+
+    fn containerBinding(ty: Type, writer: anytype, container: *Container, param_name: []const u8) !void {
+        _ = ty;
+        var offset: usize = 0;
+        for (container.fields.items) |field| {
+            switch (field.type.info) {
+                .int => try writer.print("wasmGetMemory().getU32({s} + {d}, true)", .{ param_name, offset }),
+                .ptr => |ptr| {
+                    switch (ptr.size) {
+                        .Slice => try writer.print(
+                            "wasmGetSlice({s} + {d}, wasmGetMemory().getU32({s} + {d} + 32, true))",
+                            .{ param_name, offset, param_name, offset },
+                        ),
+                        else => {},
+                    }
+                },
+                .bool => try writer.print("Boolean(wasmGetMemory().getU8({s} + {d}, true))", .{ param_name, offset }),
+
+                else => {},
+            }
+            try writer.writeAll(",\n");
+            offset += field.type.getJsSize();
         }
     }
 };

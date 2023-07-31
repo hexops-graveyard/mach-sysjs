@@ -325,7 +325,7 @@ fn resolveType(
                                     if (cont.val_type == .namespace) {
                                         return Type{ .slice = cname, .info = .{ .composite_ref = {} } };
                                     } else {
-                                        // TODO: resolve struct_val
+                                        return Type{ .slice = cname, .info = .{ .container_value = cont } };
                                     }
                                 }
                             }
