@@ -333,6 +333,7 @@ pub const Type = struct {
         bool: void,
         anyopaque: void,
         composite_ref: void,
+        name_ref: void,
         composite: Composite,
     };
 
