@@ -14,6 +14,7 @@ root: *Container = undefined,
 
 pub fn addRoot(gen: *IrGen) !void {
     gen.root = try gen.addContainer(null, gen.ast.containerDeclRoot(), null);
+    gen.resolveContainer(gen.root);
 }
 
 fn addContainer(
@@ -77,7 +78,6 @@ fn addContainer(
                 .name = "id",
                 .type = .{
                     .slice = "u32",
-
                     .info = .{ .int = .{ .bits = 32, .signedness = .unsigned } },
                 },
             });
@@ -85,6 +85,26 @@ fn addContainer(
     }
 
     return cont;
+}
+
+// Resolves all types in a container recursively
+fn resolveContainer(gen: *IrGen, cont: *Container) void {
+    for (cont.contents.items, 0..) |item, idx| {
+        switch (item) {
+            .func => {
+                var fun = cont.contents.items[idx].func;
+                fun.return_ty = gen.resolveType(cont, fun.return_ty);
+
+                for (fun.params, 0..) |param, pid| {
+                    var par = fun.params[pid];
+                    par.type = gen.resolveType(cont, param.type);
+                    fun.params[pid] = par;
+                }
+            },
+            .container => |child| gen.resolveContainer(child),
+            else => {},
+        }
+    }
 }
 
 fn addContainerField(
@@ -278,8 +298,49 @@ fn makeType(gen: IrGen, index: Ast.Node.Index) !Type {
 
     return Type{
         .slice = token_slice,
-        .info = .{ .composite_ref = {} },
+        .info = .{ .name_ref = {} },
     };
+}
+
+fn resolveType(
+    gen: IrGen,
+    container: *Container,
+    ty: Type,
+) Type {
+    _ = gen;
+    switch (ty.info) {
+        .name_ref => {
+            if (container.name) |cname| {
+                if (std.mem.eql(u8, cname, ty.slice))
+                    return Type{ .slice = cname, .info = .{ .composite_ref = {} } };
+            }
+
+            var container_parent = container.parent;
+            while (container_parent) |parent| {
+                for (parent.contents.items) |item| {
+                    switch (item) {
+                        .container => |cont| {
+                            if (cont.name) |cname| {
+                                if (std.mem.eql(u8, cname, ty.slice)) {
+                                    if (cont.val_type == .namespace) {
+                                        return Type{ .slice = cname, .info = .{ .composite_ref = {} } };
+                                    } else {
+                                        // TODO: resolve struct_val
+                                    }
+                                }
+                            }
+                        },
+                        else => {},
+                    }
+                }
+
+                container_parent = parent.parent;
+            }
+        },
+        else => {},
+    }
+
+    return ty;
 }
 
 fn makeCompositeType(
