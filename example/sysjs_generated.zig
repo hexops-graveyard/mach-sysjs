@@ -43,6 +43,14 @@ pub const String = struct {
     }
 };
 
+pub const SomeClass = struct {
+
+    extern fn sysjs_SomeClass_someFunc(str: CTestingValueStructs) void;
+    pub inline fn someFunc(str: CTestingValueStructs) void {
+        return sysjs_SomeClass_someFunc(str);
+    }
+};
+
 pub const TestingValueStructs = struct {
     index: u32,
     name: []const u8,
