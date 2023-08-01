@@ -55,12 +55,16 @@ pub const TestingValueStructs = struct {
     index: u32,
     name: []const u8,
     is_test: bool,
+    value: InternalStruct,
+    a_val: f16,
 
     pub fn toExtern(s: TestingValueStructs) CTestingValueStructs {
         return CTestingValueStructs{
             .index = s.index,
             .name = s.name.ptr, .name_len = s.name.len,
             .is_test = s.is_test,
+            .value = s.value.toExtern(),
+            .a_val = s.a_val,
         };
     }
 };
@@ -69,6 +73,26 @@ pub const CTestingValueStructs = extern struct {
     index: u32,
     name: [*]const u8, name_len: u32,
     is_test: bool,
+    value: CInternalStruct,
+    a_val: f32,
+
+};
+
+pub const InternalStruct = struct {
+    idx: u32,
+    any: f64,
+
+    pub fn toExtern(s: InternalStruct) CInternalStruct {
+        return CInternalStruct{
+            .idx = s.idx,
+            .any = s.any,
+        };
+    }
+};
+
+pub const CInternalStruct = extern struct {
+    idx: u32,
+    any: f64,
 
 };
 pub fn doPrint() void {
