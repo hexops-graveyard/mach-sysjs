@@ -49,9 +49,14 @@ export function sysjs_String_charAt(string, index) {
 }
 export function sysjs_SomeClass_someFunc(str) {
     const l0 = {
-wasmGetMemory().getU32(str + 0, true),
-wasmGetSlice(str + 32, wasmGetMemory().getU32(str + 32 + 32, true)),
-Boolean(wasmGetMemory().getU8(str + 96, true)),
+'index': wasmGetMemory().getUint32(str + 0, true),
+'name': wasmGetSlice(str + 32, wasmGetMemory().getU32(str + 32 + 32, true)),
+'is_test': Boolean(wasmGetMemory().getUint8(str + 96, true)),
+'value': {
+'idx': wasmGetMemory().getUint32(str + 104 + 0, true),
+'any': wasmGetMemory().getFloat64(str + 104 + 32, true),
+},
+'a_val': wasmGetMemory().getFloat32(str + 200, true),
 };
     return SomeClass.someFunc(l0);
 }

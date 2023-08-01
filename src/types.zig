@@ -54,8 +54,7 @@ pub const Container = struct {
 
         for (container.fields.items) |field| {
             try writer.writeByteNTimes(' ', local_indent);
-            try field.type.emitParam(writer, field.name);
-            try writer.writeAll(",\n");
+            try writer.print("{s}: {s},\n", .{ field.name, field.type.slice });
         }
 
         try writer.writeByte('\n');
@@ -366,6 +365,7 @@ pub const Type = struct {
     pub fn getJsSize(ty: Type) usize {
         switch (ty.info) {
             .int => |int| return std.math.powi(usize, 2, std.math.log2_int_ceil(usize, int.bits)) catch unreachable,
+            .float => |float| return std.math.clamp(float.bits, 32, 64),
             .ptr => return 64,
             .bool => return 8,
             else => return 0,
@@ -395,6 +395,8 @@ pub const Type = struct {
         try printParamName(writer, param_name, null);
 
         switch (ty.info) {
+            .int => |int| try writer.print("{c}{d}", .{ @tagName(int.signedness)[0], ty.getJsSize() }),
+            .float => try writer.print("f{d}", .{ty.getJsSize()}),
             .ptr => |ptr| {
                 switch (ptr.size) {
                     .Slice => {
@@ -435,6 +437,10 @@ pub const Type = struct {
                 ),
                 else => {}, // TODO: one, many
             },
+            .container_value => try writer.print(
+                ".{s} = {s}.{s}.toExtern(),\n",
+                .{ field_name, struct_name, field_name },
+            ),
             else => try writer.print(".{s} = {s}.{s},\n", .{ field_name, struct_name, field_name }),
         }
     }
@@ -459,23 +465,34 @@ pub const Type = struct {
             .composite_ref => {
                 try writer.print("wasmGetObject({s})", .{param_name});
             },
-            .container_value => |container| {
-                try writer.writeAll("{\n");
-                try ty.containerBinding(writer, container, param_name);
-                try writer.writeAll("}");
-            },
+            .container_value => |container| _ = try ty.containerBinding(writer, container, param_name),
             else => try writer.print("{s}", .{param_name}),
         }
 
         try writer.writeAll(";\n");
     }
 
-    fn containerBinding(ty: Type, writer: anytype, container: *Container, param_name: []const u8) !void {
-        _ = ty;
+    fn containerBinding(ty: Type, writer: anytype, container: *Container, param_name: []const u8) !usize {
+        try writer.writeAll("{\n");
+
         var offset: usize = 0;
         for (container.fields.items) |field| {
+            try writer.print("'{s}': ", .{field.name});
             switch (field.type.info) {
-                .int => try writer.print("wasmGetMemory().getU32({s} + {d}, true)", .{ param_name, offset }),
+                .int => |int| try writer.print(
+                    "wasmGetMemory().get{s}{d}({s} + {d}, true)",
+                    .{
+                        // TODO: u64/i64 support
+                        if (int.signedness == .unsigned) "Uint" else "Int",
+                        field.type.getJsSize(),
+                        param_name,
+                        offset,
+                    },
+                ),
+                .float => try writer.print(
+                    "wasmGetMemory().getFloat{d}({s} + {d}, true)",
+                    .{ field.type.getJsSize(), param_name, offset },
+                ),
                 .ptr => |ptr| {
                     switch (ptr.size) {
                         .Slice => try writer.print(
@@ -485,12 +502,23 @@ pub const Type = struct {
                         else => {},
                     }
                 },
-                .bool => try writer.print("Boolean(wasmGetMemory().getU8({s} + {d}, true))", .{ param_name, offset }),
+                .bool => try writer.print(
+                    "Boolean(wasmGetMemory().getUint8({s} + {d}, true))",
+                    .{ param_name, offset },
+                ),
+                .container_value => |child_container| {
+                    var buf: [256]u8 = undefined;
+                    const buf_offset = try std.fmt.bufPrint(&buf, "{s} + {d}", .{ param_name, offset });
 
+                    offset += try ty.containerBinding(writer, child_container, buf_offset);
+                },
                 else => {},
             }
             try writer.writeAll(",\n");
             offset += field.type.getJsSize();
         }
+        try writer.writeAll("}");
+
+        return offset;
     }
 };

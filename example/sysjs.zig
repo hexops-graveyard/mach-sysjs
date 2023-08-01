@@ -28,6 +28,13 @@ pub const TestingValueStructs = struct {
     index: u32,
     name: []const u8,
     is_test: bool,
+    value: InternalStruct,
+    a_val: f16,
+};
+
+pub const InternalStruct = struct {
+    idx: u32,
+    any: f64,
 };
 
 /// doPrint does stuff

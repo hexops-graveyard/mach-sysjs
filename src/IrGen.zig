@@ -105,6 +105,10 @@ fn resolveContainer(gen: *IrGen, cont: *Container) void {
             else => {},
         }
     }
+
+    for (cont.fields.items, 0..) |field, idx| {
+        cont.fields.items[idx].type = gen.resolveType(cont, field.type);
+    }
 }
 
 fn addContainerField(
