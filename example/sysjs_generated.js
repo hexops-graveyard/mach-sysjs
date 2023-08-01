@@ -23,12 +23,12 @@ function wasmGetObject(id) {
 /* Gen */
 export function sysjs_console_log(string, string_len) {
     const l0 = wasmGetSlice(string, string_len);
-    return console.log(l0);
+    console.log(l0);
 }
 export function sysjs_console_log2(string, string_len, v1, v1_len) {
     const l0 = wasmGetSlice(string, string_len);
     const l1 = wasmGetSlice(v1, v1_len);
-    return console.log2(l0, l1);
+    console.log2(l0, l1);
 }
 export function sysjs_TextDecoder_new() {
     return wasmWrapObject(new TextDecoder());
@@ -58,5 +58,5 @@ export function sysjs_SomeClass_someFunc(str) {
 },
 'a_val': wasmGetMemory().getFloat32(str + 200, true),
 };
-    return SomeClass.someFunc(l0);
+    const ret_val = SomeClass.someFunc(l0);
 }

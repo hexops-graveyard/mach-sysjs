@@ -20,7 +20,7 @@ pub const bindings = struct {
     };
 
     pub const SomeClass = struct {
-        someFunc: fn (str: TestingValueStructs) void,
+        someFunc: fn (str: TestingValueStructs) InternalStruct,
     };
 };
 
