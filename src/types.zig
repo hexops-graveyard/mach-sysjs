@@ -199,9 +199,18 @@ pub const Function = struct {
             try param.type.emitExternParam(writer, param.name);
         }
 
-        try writer.writeAll(") ");
-        try fun.return_ty.emitExternParam(writer, null);
-        try writer.writeAll(";\n");
+        switch (fun.return_ty.info) {
+            .container_value => {
+                try writer.writeAll(", ");
+                try fun.return_ty.emitExternParam(writer, "return_val");
+                try writer.writeAll(") void;\n");
+            },
+            else => {
+                try writer.writeAll(") ");
+                try fun.return_ty.emitExternParam(writer, null);
+                try writer.writeAll(";\n");
+            },
+        }
     }
 
     pub fn emitWrapper(fun: Function, writer: anytype, indent: u8, namespace: Container.Namespace) !void {
@@ -224,7 +233,18 @@ pub const Function = struct {
         try writer.writeAll(" {\n");
 
         _ = try writer.writeByteNTimes(' ', indent + 4);
-        try writer.writeAll("return ");
+
+        switch (fun.return_ty.info) {
+            .void => {},
+            .container_value => {
+                try writer.writeAll("var return_val: ");
+                try fun.return_ty.emitExternParam(writer, null);
+                try writer.writeAll(" = undefined;\n");
+
+                _ = try writer.writeByteNTimes(' ', indent + 4);
+            },
+            else => try writer.writeAll("return "),
+        }
 
         const is_ret_obj = fun.return_ty.info == .composite_ref;
         if (is_ret_obj) {
@@ -247,7 +267,12 @@ pub const Function = struct {
             }
         }
 
-        try writer.writeByte(')');
+        if (fun.return_ty.info == .container_value) {
+            try writer.writeAll(", &return_val);\n");
+            _ = try writer.writeByteNTimes(' ', indent + 4);
+            try writer.writeAll("return return_val");
+        } else try writer.writeByte(')');
+
         if (is_ret_obj) try writer.writeByte('}');
         try writer.writeAll(";\n");
 
@@ -289,10 +314,15 @@ pub const Function = struct {
         const is_const = fun.val_ty == .constructor;
         const is_method = fun.val_ty == .method;
 
-        try writer.print("return {s}{s}", .{
-            if (is_ret_obj) "wasmWrapObject(" else "",
-            if (is_const) "new " else "",
-        });
+        switch (fun.return_ty.info) {
+            .void => {},
+            .container_value => try writer.writeAll("const ret_val = "),
+            .composite_ref => try writer.writeAll("return wasmWrapObject("),
+            else => try writer.writeAll("return "),
+        }
+
+        if (is_const)
+            try writer.writeAll("new ");
 
         var arg_index: u32 = 0;
         if (is_method) {

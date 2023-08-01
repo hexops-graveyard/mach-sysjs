@@ -9,11 +9,11 @@ pub const console = struct {
 
     extern fn sysjs_console_log(string: [*]const u8, string_len: u32) void;
     pub inline fn log(string: []const u8) void {
-        return sysjs_console_log(string.ptr, string.len);
+        sysjs_console_log(string.ptr, string.len);
     }
     extern fn sysjs_console_log2(string: [*]const u8, string_len: u32, [*]const u8, u32) void;
     pub inline fn log2(string: []const u8, v1: []const u8) void {
-        return sysjs_console_log2(string.ptr, string.len, v1.ptr, v1.len);
+        sysjs_console_log2(string.ptr, string.len, v1.ptr, v1.len);
     }
 };
 
@@ -45,9 +45,11 @@ pub const String = struct {
 
 pub const SomeClass = struct {
 
-    extern fn sysjs_SomeClass_someFunc(str: CTestingValueStructs) void;
-    pub inline fn someFunc(str: CTestingValueStructs) void {
-        return sysjs_SomeClass_someFunc(str);
+    extern fn sysjs_SomeClass_someFunc(str: CTestingValueStructs, return_val: CInternalStruct) void;
+    pub inline fn someFunc(str: CTestingValueStructs) CInternalStruct {
+        var return_val: CInternalStruct = undefined;
+        sysjs_SomeClass_someFunc(str, &return_val);
+        return return_val;
     }
 };
 
