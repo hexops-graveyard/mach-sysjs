@@ -115,16 +115,16 @@ pub const Object = struct {
 
     pub fn get(obj: *const Object, prop: []const u8) Value {
         var ret: Value = undefined;
-        js.zigGetProperty(obj.ref, prop.ptr, @intCast(u32, prop.len), &ret);
+        js.zigGetProperty(obj.ref, prop.ptr, @as(u32, @intCast(prop.len)), &ret);
         return ret;
     }
 
     pub fn set(obj: *const Object, prop: []const u8, value: Value) void {
-        js.zigSetProperty(obj.ref, prop.ptr, @intCast(u32, prop.len), &value);
+        js.zigSetProperty(obj.ref, prop.ptr, @as(u32, @intCast(prop.len)), &value);
     }
 
     pub fn delete(obj: *const Object, prop: []const u8) void {
-        js.zigDeleteProperty(obj.ref, prop.ptr, @intCast(u32, prop.len));
+        js.zigDeleteProperty(obj.ref, prop.ptr, @as(u32, @intCast(prop.len)));
     }
 
     pub fn getIndex(obj: *const Object, index: u32) Value {
@@ -142,12 +142,12 @@ pub const Object = struct {
     }
 
     pub fn copyBytes(obj: *const Object, bytes: []u8) void {
-        js.zigCopyBytes(obj.ref, bytes.ptr, @intCast(u32, bytes.len));
+        js.zigCopyBytes(obj.ref, bytes.ptr, @as(u32, @intCast(bytes.len)));
     }
 
     pub fn call(obj: *const Object, fun: []const u8, args: []const Value) Value {
         var ret: Value = undefined;
-        js.zigFunctionCall(obj.ref, fun.ptr, @intCast(u32, fun.len), args.ptr, @intCast(u32, args.len), &ret);
+        js.zigFunctionCall(obj.ref, fun.ptr, @as(u32, @intCast(fun.len)), args.ptr, @as(u32, @intCast(args.len)), &ret);
         return ret;
     }
 };
@@ -169,12 +169,12 @@ pub const Function = struct {
     }
 
     pub fn construct(func: *const Function, args: []const Value) Object {
-        return .{ .ref = js.zigConstructType(func.ref, args.ptr, @intCast(u32, args.len)) };
+        return .{ .ref = js.zigConstructType(func.ref, args.ptr, @as(u32, @intCast(args.len))) };
     }
 
     pub fn invoke(func: *const Function, args: []const Value) Value {
         var ret: Value = undefined;
-        js.zigFunctionInvoke(func.ref, args.ptr, @intCast(u32, args.len), &ret);
+        js.zigFunctionInvoke(func.ref, args.ptr, @as(u32, @intCast(args.len)), &ret);
         return ret;
     }
 };
@@ -208,7 +208,7 @@ export fn wasmCallFunction(id: *anyopaque, args: u32, len: u32, captures: [*]Val
     captures_slice.len = captures_len;
 
     const obj = Object{ .ref = args };
-    var func = @ptrCast(FunType, @alignCast(std.meta.alignment(FunType), id));
+    var func = @as(FunType, @ptrCast(@alignCast(std.meta.alignment(FunType), id)));
     obj.set("return_value", func(obj, len, captures_slice));
 }
 
@@ -225,7 +225,7 @@ pub fn createArray() Object {
 }
 
 pub fn createString(string: []const u8) String {
-    return .{ .ref = js.zigCreateString(string.ptr, @intCast(u32, string.len)) };
+    return .{ .ref = js.zigCreateString(string.ptr, @as(u32, @intCast(string.len))) };
 }
 
 pub fn createNumber(num: anytype) Value {
@@ -254,7 +254,7 @@ pub fn createUndefined() Value {
 const FunType = *const fn (args: Object, args_len: u32, captures: []Value) Value;
 
 pub fn createFunction(fun: FunType, captures: []Value) Function {
-    return .{ .ref = js.zigCreateFunction(fun, captures.ptr, @intCast(u32, captures.len)) };
+    return .{ .ref = js.zigCreateFunction(fun, captures.ptr, @as(u32, @intCast(captures.len))) };
 }
 
 pub fn constructType(t: []const u8, args: []const Value) Object {
