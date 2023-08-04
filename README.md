@@ -1,7 +1,5 @@
 # mach/sysjs - enables Zig/WASM to speak to JavaScript
 
-This repository is a separate copy of the same library in the [main Mach repository](https://github.com/hexops/mach), and is automatically kept in sync, so that anyone can use this library in their own project if they like!
-
 ## Experimental
 
 This is an _experimental_ Mach library, according to our [stability guarantees](https://machengine.org/next/docs/libs/):
