@@ -1,0 +1,24 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8">
+    <title>{[app_name]s}</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico" />
+</head>
+
+<body>
+    <script type="module">
+        {[imports]s}
+
+        import * as loader from "./loader.js";
+        const instance = await loader.load("{[wasm_path]s}.wasm", imports);
+        let wasm = instance.exports;
+
+        {[inits]s}
+
+        loader.init(instance);
+    </script>
+</body>
+
+</html>
