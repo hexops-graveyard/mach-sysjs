@@ -7,9 +7,9 @@ const builtin = @import("builtin");
 
 pub const console = struct {
 
-    extern fn sysjs_console_log(string: [*]const u8, string_len: u32) void;
-    pub inline fn log(string: []const u8) void {
-        sysjs_console_log(string.ptr, string.len);
+    extern fn sysjs_console_log(string: u32) void;
+    pub inline fn log(string: String) void {
+        sysjs_console_log(string.id);
     }
     extern fn sysjs_console_log2(string: [*]const u8, string_len: u32, [*]const u8, u32) void;
     pub inline fn log2(string: []const u8, v1: []const u8) void {

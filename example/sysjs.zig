@@ -5,7 +5,7 @@ const builtin = @import("builtin");
 pub const bindings = struct {
     pub const console = struct {
         /// console.log invokes the JS console.log API
-        log: fn (string: []const u8) void,
+        log: fn (string: String) void,
         log2: fn (string: []const u8, []const u8) void,
     };
 
