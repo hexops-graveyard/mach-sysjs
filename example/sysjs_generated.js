@@ -50,7 +50,7 @@ export function sysjs_String_new(buf, buf_len) {
 export function sysjs_String_charAt(string, index) {
     const l0 = wasmGetObject(string);
     const l1 = index;
-    return l0.charAt(l1);
+    return wasmWrapObject(l0.charAt(l1));
 }
 export function sysjs_SomeClass_someFunc(str) {
     const l0 = {

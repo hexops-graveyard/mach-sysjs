@@ -37,9 +37,9 @@ pub const String = struct {
     pub inline fn new(buf: []const u8) String {
         return String{.id = sysjs_String_new(buf.ptr, buf.len)};
     }
-    extern fn sysjs_String_charAt(string: u32, index: u32) u8;
-    pub inline fn charAt(string: String, index: u32) u8 {
-        return sysjs_String_charAt(string.id, index);
+    extern fn sysjs_String_charAt(string: u32, index: u32) u32;
+    pub inline fn charAt(string: String, index: u32) String {
+        return String{.id = sysjs_String_charAt(string.id, index)};
     }
 };
 

@@ -16,7 +16,7 @@ pub const bindings = struct {
 
     pub const String = struct {
         new: fn (buf: []const u8) String,
-        charAt: fn (string: String, index: u32) u8,
+        charAt: fn (string: String, index: u32) String,
     };
 
     pub const SomeClass = struct {

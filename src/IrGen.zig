@@ -205,7 +205,10 @@ fn addFunction(gen: IrGen, container: *Container, node_index: Ast.TokenIndex, na
         .params = params.items,
         .parent = container,
         .val_ty = if (container.name) |coname|
-            if (std.mem.eql(u8, coname, return_type.slice))
+            // If the return type is container and the function name is 'new', it is a container
+            // If the function name is not new, but return type is container, we can assume that
+            // the function returns an appropriate type, so `new Class()` is not needed.
+            if (std.mem.eql(u8, coname, return_type.slice) and std.mem.eql(u8, name, "new"))
                 .constructor
             else if (params.items.len > 0 and
                 std.mem.eql(u8, coname, params.items[0].type.slice))
