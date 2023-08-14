@@ -1,12 +1,7 @@
 const std = @import("std");
 const sysjs = @import("src/main.zig");
 
-/// Global instance of this module's builder to be used by functions invoked from other modules.
-var builder_instance: ?*std.Build = null;
-
 pub fn build(b: *std.Build) !void {
-    builder_instance = b;
-
     const optimize = b.standardOptimizeOption(.{});
 
     _ = b.addModule("mach-sysjs", .{
@@ -25,21 +20,26 @@ pub fn build(b: *std.Build) !void {
         .name = "example",
         .src = "example/main.zig",
         .optimize = optimize,
-        .deps = &[_]App.Dependency{App.Dependency{
-            .name = "sysjs",
-            .binding_file = "example/sysjs_generated.js",
-            .wrapper_file = "example/sysjs_generated.zig",
-        }},
+        .deps = &.{
+            .{
+                .name = "sysjs",
+                .generated_js_file = "example/sysjs_generated.js",
+                .generated_zig_file = "example/sysjs_generated.zig",
+            },
+        },
     });
 
     var example_compile_step = b.step("example", "Compile example");
     example_compile_step.dependOn(&app.install.step);
-
-    // const test_step = b.step("test", "Run library tests");
-    // test_step.dependOn(&testStep(b, optimize, target).step);
 }
 
 pub const index_html = @embedFile("www/index.html");
+
+pub const Dependency = struct {
+    name: []const u8,
+    generated_js_file: []const u8,
+    generated_zig_file: []const u8,
+};
 
 pub const App = struct {
     b: *std.Build,
@@ -73,19 +73,19 @@ pub const App = struct {
         for (options.deps) |dep| {
             try import_writer.print(
                 "import * as {s} from './{s}';\n",
-                .{ dep.name, std.fs.path.basename(dep.binding_file) },
+                .{ dep.name, std.fs.path.basename(dep.generated_js_file) },
             );
 
             try inits.writer().print("{s}.init(wasm);\n", .{dep.name});
 
             const module = b.createModule(.{
-                .source_file = .{ .path = b.pathFromRoot(dep.wrapper_file) },
+                .source_file = .{ .path = b.pathFromRoot(dep.generated_zig_file) },
             });
             lib.addModule(dep.name, module);
 
             const install_js = b.addInstallFile(
-                .{ .path = dep.binding_file },
-                try std.fs.path.join(b.allocator, &.{ "www/", std.fs.path.basename(dep.binding_file) }),
+                .{ .path = dep.generated_js_file },
+                try std.fs.path.join(b.allocator, &.{ "www/", std.fs.path.basename(dep.generated_js_file) }),
             );
             install.step.dependOn(&install_js.step);
         }
@@ -121,33 +121,4 @@ pub const App = struct {
             .install = install,
         };
     }
-
-    pub const Dependency = struct {
-        name: []const u8,
-        binding_file: []const u8,
-        wrapper_file: []const u8,
-    };
 };
-
-fn testStep(
-    b: *std.Build,
-    optimize: std.builtin.OptimizeMode,
-    target: std.zig.CrossTarget,
-) *std.build.RunStep {
-    const main_tests = b.addTest(.{
-        .name = "sysjs-tests",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
-    });
-    return b.addRunArtifact(main_tests);
-}
-
-/// Returns the path to the JS code file, used for building artifacts.
-///
-/// The returned path is heap-allocated in the builder's arena.
-pub fn getJSPath() []u8 {
-    const b = builder_instance orelse @panic("Builder instance not initialized!");
-
-    return b.pathFromRoot("src/mach-sysjs.js");
-}
