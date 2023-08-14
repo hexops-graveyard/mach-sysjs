@@ -62,25 +62,25 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
         fn generateJsScaffold(gen: *@This()) !void {
             try gen.js.writeAll(
                 \\let wasm = undefined;
-                \\let wasmMemoryBuf = undefined;
+                \\let wasm_memory_buf = undefined;
                 \\function wasmGetMemory() {
-                \\    if (wasmMemoryBuf === undefined || wasmMemoryBuf !== wasm.memory.buffer) {
-                \\        wasmMemoryBuf = new Uint8Array(wasm.memory.buffer);
+                \\    if (wasm_memory_buf === undefined || wasm_memory_buf !== wasm.memory.buffer) {
+                \\        wasm_memory_buf = new Uint8Array(wasm.memory.buffer);
                 \\    }
-                \\    return wasmMemoryBuf;
+                \\    return wasm_memory_buf;
                 \\}
                 \\
                 \\function wasmGetSlice(ptr, len) {
                 \\    return wasmGetMemory().slice(ptr, ptr + len);
                 \\}
                 \\
-                \\let wasmObjects = [];
+                \\let wasm_objects = [];
                 \\function wasmWrapObject(obj) {
-                \\    return wasmObjects.push(obj) - 1;
+                \\    return wasm_objects.push(obj) - 1;
                 \\}
                 \\
                 \\function wasmGetObject(id) {
-                \\    return wasmObjects[id];
+                \\    return wasm_objects[id];
                 \\}
                 \\
                 \\export function init(wasmObj) {
