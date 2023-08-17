@@ -43,58 +43,30 @@ pub const String = struct {
     }
 };
 
-pub const SomeClass = struct {
+pub const navigator = struct {
 
-    extern fn sysjs_SomeClass_someFunc(str: CTestingValueStructs, return_val: CInternalStruct) void;
-    pub inline fn someFunc(str: CTestingValueStructs) CInternalStruct {
-        var return_val: CInternalStruct = undefined;
-        sysjs_SomeClass_someFunc(str, &return_val);
-        return return_val;
-    }
+
+    pub const gpu = struct {
+
+        extern fn sysjs_navigator_gpu_requestAdapter(options: *const CRequestAdapterOptions) void;
+        pub inline fn requestAdapter(options: CRequestAdapterOptions) void {
+            sysjs_navigator_gpu_requestAdapter(&options);
+        }
+    };
 };
 
-pub const TestingValueStructs = struct {
-    index: u32,
-    name: []const u8,
-    is_test: bool,
-    value: InternalStruct,
-    a_val: f16,
+pub const RequestAdapterOptions = struct {
+    powerPreference: String,
 
-    pub fn toExtern(s: TestingValueStructs) CTestingValueStructs {
-        return CTestingValueStructs{
-            .index = s.index,
-            .name = s.name.ptr, .name_len = s.name.len,
-            .is_test = s.is_test,
-            .value = s.value.toExtern(),
-            .a_val = s.a_val,
+    pub fn toExtern(s: RequestAdapterOptions) CRequestAdapterOptions {
+        return CRequestAdapterOptions{
+            .powerPreference = s.powerPreference.id,
         };
     }
 };
 
-pub const CTestingValueStructs = extern struct {
-    index: u32,
-    name: [*]const u8, name_len: u32,
-    is_test: bool,
-    value: CInternalStruct,
-    a_val: f32,
-
-};
-
-pub const InternalStruct = struct {
-    idx: u32,
-    any: f64,
-
-    pub fn toExtern(s: InternalStruct) CInternalStruct {
-        return CInternalStruct{
-            .idx = s.idx,
-            .any = s.any,
-        };
-    }
-};
-
-pub const CInternalStruct = extern struct {
-    idx: u32,
-    any: f64,
+pub const CRequestAdapterOptions = extern struct {
+    powerPreference: u32,
 
 };
 pub fn doPrint() void {
