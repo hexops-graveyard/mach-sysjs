@@ -70,6 +70,10 @@ fn Generator(comptime ZigWriter: type, comptime JSWriter: type) type {
                 \\    return wasm_memory_buf;
                 \\}
                 \\
+                \\function wasmGetDataView() {
+                \\    return new DataView(wasm.memory.buffer);
+                \\}
+                \\
                 \\function wasmGetSlice(ptr, len) {
                 \\    return wasmGetMemory().slice(ptr, ptr + len);
                 \\}

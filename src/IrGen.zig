@@ -37,6 +37,9 @@ fn addContainer(
             .struct_val,
     };
 
+    if (parent) |par|
+        try par.children.append(gen.allocator, cont);
+
     for (container_decl.ast.members) |decl_idx| {
         const std_type = analysis.getDeclType(gen.ast, decl_idx);
         switch (std_type) {
@@ -310,36 +313,23 @@ fn makeType(gen: IrGen, index: Ast.Node.Index) !Type {
 }
 
 fn resolveType(
-    gen: IrGen,
+    gen: *IrGen,
     container: *Container,
     ty: Type,
 ) Type {
-    _ = gen;
     switch (ty.info) {
         .name_ref => {
+            // Check if type is current container
             if (container.name) |cname| {
                 if (std.mem.eql(u8, cname, ty.slice))
                     return Type{ .slice = cname, .info = .{ .composite_ref = {} } };
             }
 
+            // Check if the type is parent, or parent's parent and so on...
             var container_parent = container.parent;
             while (container_parent) |parent| {
-                for (parent.contents.items) |item| {
-                    switch (item) {
-                        .container => |cont| {
-                            if (cont.name) |cname| {
-                                if (std.mem.eql(u8, cname, ty.slice)) {
-                                    if (cont.val_type == .namespace) {
-                                        return Type{ .slice = cname, .info = .{ .composite_ref = {} } };
-                                    } else {
-                                        return Type{ .slice = cname, .info = .{ .container_value = cont } };
-                                    }
-                                }
-                            }
-                        },
-                        else => {},
-                    }
-                }
+                if (gen.resolveTypeRecurse(parent.contents.items, ty)) |resolved_type|
+                    return resolved_type;
 
                 container_parent = parent.parent;
             }
@@ -348,6 +338,29 @@ fn resolveType(
     }
 
     return ty;
+}
+
+fn resolveTypeRecurse(gen: *IrGen, contents: []Container.Content, ty: Type) ?Type {
+    for (contents) |item| {
+        switch (item) {
+            .container => |cont| {
+                if (cont.name) |cname| {
+                    if (std.mem.eql(u8, cname, ty.slice)) {
+                        if (cont.val_type == .namespace) {
+                            return Type{ .slice = cname, .info = .{ .composite_ref = {} } };
+                        } else {
+                            return Type{ .slice = cname, .info = .{ .container_value = cont } };
+                        }
+                    }
+                }
+
+                if (gen.resolveTypeRecurse(cont.contents.items, ty)) |res|
+                    return res;
+            },
+            else => {},
+        }
+    }
+    return null;
 }
 
 fn makeCompositeType(

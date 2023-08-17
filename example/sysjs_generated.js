@@ -8,6 +8,10 @@ function wasmGetMemory() {
     return wasm_memory_buf;
 }
 
+function wasmGetDataView() {
+    return new DataView(wasm.memory.buffer);
+}
+
 function wasmGetSlice(ptr, len) {
     return wasmGetMemory().slice(ptr, ptr + len);
 }
@@ -52,16 +56,9 @@ export function sysjs_String_charAt(string, index) {
     const l1 = index;
     return wasmWrapObject(l0.charAt(l1));
 }
-export function sysjs_SomeClass_someFunc(str) {
+export function sysjs_navigator_gpu_requestAdapter(options) {
     const l0 = {
-'index': wasmGetMemory().getUint32(str + 0, true),
-'name': wasmGetSlice(str + 32, wasmGetMemory().getU32(str + 32 + 32, true)),
-'is_test': Boolean(wasmGetMemory().getUint8(str + 96, true)),
-'value': {
-'idx': wasmGetMemory().getUint32(str + 104 + 0, true),
-'any': wasmGetMemory().getFloat64(str + 104 + 32, true),
-},
-'a_val': wasmGetMemory().getFloat32(str + 200, true),
+'powerPreference': wasmGetObject(wasmGetDataView().getUint32(options + 0, true)),
 };
-    const ret_val = SomeClass.someFunc(l0);
+    navigator.gpu.requestAdapter(l0);
 }

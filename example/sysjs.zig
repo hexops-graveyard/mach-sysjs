@@ -19,22 +19,15 @@ pub const bindings = struct {
         charAt: fn (string: String, index: u32) String,
     };
 
-    pub const SomeClass = struct {
-        someFunc: fn (str: TestingValueStructs) InternalStruct,
+    pub const navigator = struct {
+        pub const gpu = struct {
+            requestAdapter: fn (options: RequestAdapterOptions) void,
+        };
     };
 };
 
-pub const TestingValueStructs = struct {
-    index: u32,
-    name: []const u8,
-    is_test: bool,
-    value: InternalStruct,
-    a_val: f16,
-};
-
-pub const InternalStruct = struct {
-    idx: u32,
-    any: f64,
+pub const RequestAdapterOptions = struct {
+    powerPreference: String,
 };
 
 /// doPrint does stuff

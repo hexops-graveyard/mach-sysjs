@@ -7,5 +7,10 @@ pub export fn main() u8 {
 
     js.console.log(string);
     js.console.log(string.charAt(3));
+
+    const power = td.decode("low-power");
+    const options = js.RequestAdapterOptions{ .powerPreference = power };
+    js.navigator.gpu.requestAdapter(options.toExtern());
+
     return 0;
 }
