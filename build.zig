@@ -96,13 +96,6 @@ pub const App = struct {
         }
         try import_writer.writeAll("}\n};\n");
 
-        // TODO: make the loader configurable
-        const install_loader = b.addInstallFile(
-            .{ .path = "www/loader.js" },
-            try std.fs.path.join(b.allocator, &.{ "www", "loader.js" }),
-        );
-        install.step.dependOn(&install_loader.step);
-
         // TODO: do the format at runtime
         const index_formatted = try std.fmt.allocPrint(b.allocator, index_html, .{
             .app_name = options.name,
