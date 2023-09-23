@@ -208,7 +208,7 @@ export fn wasmCallFunction(id: *anyopaque, args: u32, len: u32, captures: [*]Val
     captures_slice.len = captures_len;
 
     const obj = Object{ .ref = args };
-    var func = @as(FunType, @ptrCast(@alignCast(std.meta.alignment(FunType), id)));
+    var func = @as(FunType, @ptrCast(@alignCast(id)));
     obj.set("return_value", func(obj, len, captures_slice));
 }
 
