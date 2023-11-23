@@ -223,7 +223,7 @@ pub const Function = struct {
             if (param.name) |name| {
                 try param.type.emitParam(writer, name);
             } else {
-                var buf: [Function.max_param_char_count]u8 = .{};
+                var buf: [Function.max_param_char_count]u8 = [_]u8{undefined} ** Function.max_param_char_count;
                 const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitParam(writer, name);
             }
@@ -262,7 +262,7 @@ pub const Function = struct {
             if (param.name) |name| {
                 try param.type.emitExternArg(writer, name);
             } else {
-                var buf: [Function.max_param_char_count]u8 = .{};
+                var buf: [Function.max_param_char_count]u8 = [_]u8{undefined} ** Function.max_param_char_count;
                 const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitExternArg(writer, name);
             }
@@ -290,7 +290,7 @@ pub const Function = struct {
             if (param.name) |name| {
                 try param.type.emitBindingParam(writer, name);
             } else {
-                var buf: [Function.max_param_char_count]u8 = .{};
+                var buf: [Function.max_param_char_count]u8 = [_]u8{undefined} ** Function.max_param_char_count;
                 const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitBindingParam(writer, name);
             }
@@ -303,7 +303,7 @@ pub const Function = struct {
             if (param.name) |name| {
                 try param.type.emitBindingGet(writer, name, i);
             } else {
-                var buf: [Function.max_param_char_count]u8 = .{};
+                var buf: [Function.max_param_char_count]u8 = [_]u8{undefined} ** Function.max_param_char_count;
                 const name = try std.fmt.bufPrint(&buf, "v{d}", .{i});
                 try param.type.emitBindingGet(writer, name, i);
             }
@@ -517,7 +517,7 @@ pub const Type = struct {
     fn containerBinding(ty: Type, writer: anytype, container: *Container, param_name: []const u8) !usize {
         try writer.writeAll("{\n");
 
-        var initial_size: usize = container.fields.items[0].type.getJsSize();
+        const initial_size: usize = container.fields.items[0].type.getJsSize();
         var offset: usize = 0;
         for (container.fields.items) |field| {
             try writer.print("'{s}': ", .{field.name});
