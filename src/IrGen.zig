@@ -170,7 +170,7 @@ fn addContainerDecl(
                     else
                         null;
 
-                    var cont = try gen.addContainer(container, container_decl, name);
+                    const cont = try gen.addContainer(container, container_decl, name);
                     try container.contents.append(gen.allocator, .{ .container = cont });
 
                     return true;
@@ -201,7 +201,7 @@ fn addFunction(gen: IrGen, container: *Container, node_index: Ast.TokenIndex, na
         });
     }
 
-    var func_obj = try gen.allocator.create(Function);
+    const func_obj = try gen.allocator.create(Function);
     func_obj.* = Function{
         .name = name,
         .return_ty = return_type,
@@ -229,7 +229,7 @@ fn makeType(gen: IrGen, index: Ast.Node.Index) !Type {
     const token_slice = gen.ast.getNodeSource(index);
     if (gen.ast.fullPtrType(index)) |ptr| {
         const child_ty = try gen.makeType(ptr.ast.child_type);
-        var base_ty = try gen.allocator.create(Type);
+        const base_ty = try gen.allocator.create(Type);
         base_ty.* = child_ty;
 
         return Type{
@@ -377,7 +377,7 @@ fn makeCompositeType(
                 const field = gen.ast.fullContainerField(decl_idx);
                 const name = gen.ast.tokenSlice(field.?.ast.main_token);
                 const ty = try gen.makeType(field.?.ast.type_expr);
-                var ty_alloc = try gen.allocator.create(Type);
+                const ty_alloc = try gen.allocator.create(Type);
                 ty_alloc.* = ty;
 
                 try fields.append(gen.allocator, .{

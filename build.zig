@@ -5,7 +5,7 @@ pub fn build(b: *std.Build) !void {
     const optimize = b.standardOptimizeOption(.{});
 
     _ = b.addModule("mach-sysjs", .{
-        .source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "src/main.zig" },
     });
 
     // Use sysjs to generate bindings
@@ -44,8 +44,8 @@ pub const Dependency = struct {
 pub const App = struct {
     b: *std.Build,
     name: []const u8,
-    compile: *std.build.Step.Compile,
-    install: *std.build.Step.InstallArtifact,
+    compile: *std.Build.Step.Compile,
+    install: *std.Build.Step.InstallArtifact,
 
     pub fn init(b: *std.Build, options: struct {
         name: []const u8,
@@ -56,12 +56,13 @@ pub const App = struct {
         b.lib_dir = b.fmt("{s}/www", .{b.install_path});
 
         const wasm32_freestanding = std.zig.CrossTarget{ .cpu_arch = .wasm32, .os_tag = .freestanding };
-        const lib = b.addSharedLibrary(.{
+        const lib = b.addExecutable(.{
             .name = options.name,
             .root_source_file = .{ .path = options.src },
             .optimize = options.optimize,
-            .target = wasm32_freestanding,
+            .target = b.resolveTargetQuery(wasm32_freestanding),
         });
+        lib.entry = .disabled;
         lib.rdynamic = true;
 
         b.installArtifact(lib);
@@ -79,9 +80,9 @@ pub const App = struct {
             try inits.writer().print("{s}.init(wasm);\n", .{dep.name});
 
             const module = b.createModule(.{
-                .source_file = .{ .path = b.pathFromRoot(dep.generated_zig_file) },
+                .root_source_file = .{ .path = b.pathFromRoot(dep.generated_zig_file) },
             });
-            lib.addModule(dep.name, module);
+            lib.root_module.addImport(dep.name, module);
 
             const install_js = b.addInstallFile(
                 .{ .path = dep.generated_js_file },
