@@ -11,7 +11,7 @@ pub fn generateFiles(
 ) !void {
     var generated_zig = try std.fs.cwd().createFile(generated_sysjs_zig, .{});
     var generated_js = try std.fs.cwd().createFile(generated_sysjs_js, .{});
-    var bindings_code = try std.fs.cwd().readFileAllocOptions(allocator, bindings_path, 1024 * 1024 * 128, null, @alignOf(u8), 0);
+    const bindings_code = try std.fs.cwd().readFileAllocOptions(allocator, bindings_path, 1024 * 1024 * 128, null, @alignOf(u8), 0);
     defer allocator.free(bindings_code);
 
     const zig_writer = generated_zig.writer();
