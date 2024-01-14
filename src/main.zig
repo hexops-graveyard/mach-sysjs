@@ -195,7 +195,7 @@ pub const String = struct {
     }
 
     pub fn getOwnedSlice(string: *const String, allocator: std.mem.Allocator) ![]const u8 {
-        var slice = try allocator.alloc(u8, string.getLength());
+        const slice = try allocator.alloc(u8, string.getLength());
         errdefer allocator.free(slice);
         js.zigGetString(string.ref, slice.ptr);
         return slice;
@@ -208,7 +208,7 @@ export fn wasmCallFunction(id: *anyopaque, args: u32, len: u32, captures: [*]Val
     captures_slice.len = captures_len;
 
     const obj = Object{ .ref = args };
-    var func = @as(FunType, @ptrCast(@alignCast(id)));
+    const func = @as(FunType, @ptrCast(@alignCast(id)));
     obj.set("return_value", func(obj, len, captures_slice));
 }
 
