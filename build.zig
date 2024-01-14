@@ -10,25 +10,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
 
     _ = b.addModule("mach-sysjs", .{
-        .source_file = .{ .path = "src/main.zig" },
+        .root_source_file = .{ .path = "src/main.zig" },
     });
 
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&testStep(b, optimize, target).step);
-}
-
-fn testStep(
-    b: *std.Build,
-    optimize: std.builtin.OptimizeMode,
-    target: std.zig.CrossTarget,
-) *std.build.RunStep {
     const main_tests = b.addTest(.{
         .name = "sysjs-tests",
         .root_source_file = .{ .path = "src/main.zig" },
         .target = target,
         .optimize = optimize,
     });
-    return b.addRunArtifact(main_tests);
+
+    const test_step = b.step("test", "Run library tests");
+    test_step.dependOn(&b.addRunArtifact(main_tests).step);
 }
 
 /// Returns the path to the JS code file, used for building artifacts.
